@@ -9,17 +9,23 @@ Features: Ping, Download, Upload, Jitter, ISP/Geo Detection, Connectivity Check,
 import argparse
 import csv
 import json
+import os
 import re
 import socket
 import subprocess
+import sys
 import time
 from datetime import datetime
 
-# --- Constants & Styling ---
+# --- Version & Constants ---
+VERSION = "1.2.0"
+MAX_RETRIES = 2
+
 # Spoof a standard Google Chrome browser to bypass Corporate Firewall User-Agent filtering
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 class C:
+    """ANSI color codes for terminal output styling."""
     RESET = "\033[0m"
     BOLD = "\033[1m"
     CYAN = "\033[96m"
@@ -32,21 +38,34 @@ class C:
 
     @classmethod
     def disable(cls):
-        """Disables colors for clean log output or --no-color flag."""
+        """Disables all ANSI color codes for clean log output or --no-color flag."""
         cls.RESET = cls.BOLD = cls.CYAN = cls.GREEN = ""
         cls.YELLOW = cls.RED = cls.BLUE = cls.MAGENTA = cls.DIM = ""
 
 
 def print_banner(quiet):
+    """Display the application banner with version information.
+    
+    Args:
+        quiet (bool): If True, suppress banner output.
+    """
     if quiet: return
     print(f"\n{C.CYAN}{C.BOLD}===================================================={C.RESET}")
     print(f"{C.CYAN}{C.BOLD}             NETWORK SPEED BENCHMARK TOOL           {C.RESET}")
-    print(f"{C.DIM}              Created by: {C.MAGENTA}{C.BOLD}Shadowharvy{C.RESET}")
+    print(f"{C.DIM}          Created by: {C.MAGENTA}{C.BOLD}Shadowharvy{C.RESET} (v{VERSION})")
     print(f"{C.CYAN}{C.BOLD}===================================================={C.RESET}\n")
 
 
-def check_endpoints(quiet):
-    """Performs a strict deep-API check with browser spoofing."""
+def check_endpoints(quiet, debug=False):
+    """Performs a strict deep-API check with browser spoofing.
+    
+    Args:
+        quiet (bool): If True, suppress progress output.
+        debug (bool): If True, print detailed debug information.
+    
+    Returns:
+        tuple: (speedtest_accessible, fastcom_accessible) as booleans.
+    """
     if not quiet:
         print(f"{C.BLUE}[i] Performing Pre-Flight Connectivity Check...{C.RESET}")
     
@@ -90,8 +109,15 @@ def check_endpoints(quiet):
     return st_ok, fast_ok
 
 
-def get_lan_ip():
-    """Gets the primary local LAN IP address."""
+def get_lan_ip(debug=False):
+    """Gets the primary local LAN IP address by connecting to a public DNS.
+    
+    Args:
+        debug (bool): If True, print debug information on failure.
+    
+    Returns:
+        str: Local IP address or 'Unavailable' if detection fails.
+    """
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(2)
@@ -99,12 +125,21 @@ def get_lan_ip():
         lan_ip = s.getsockname()[0]
         s.close()
         return lan_ip
-    except Exception:
+    except Exception as e:
+        if debug:
+            print(f"{C.YELLOW}[DEBUG] Failed to get LAN IP: {e}{C.RESET}")
         return "Unavailable"
 
 
-def get_geo_info():
-    """Gets public IP, ISP, and Location using ip-api.com via curl with browser spoofing."""
+def get_geo_info(debug=False):
+    """Gets public IP, ISP, and Location using ip-api.com via curl with browser spoofing.
+    
+    Args:
+        debug (bool): If True, print debug information on failure.
+    
+    Returns:
+        dict: Dictionary with keys: ip, isp, city, country. Defaults to 'Unavailable'/'Unknown' on failure.
+    """
     try:
         res = subprocess.run(
             ["curl", "-s", "-A", USER_AGENT, "--max-time", "5", "http://ip-api.com/json/"],
@@ -120,93 +155,180 @@ def get_geo_info():
                     "city": data.get("city", "Unknown"),
                     "country": data.get("country", "Unknown")
                 }
-    except Exception:
-        pass
+    except Exception as e:
+        if debug:
+            print(f"{C.YELLOW}[DEBUG] Failed to get geolocation: {e}{C.RESET}")
     return {"ip": "Unavailable", "isp": "Unknown", "city": "Unknown", "country": "Unknown"}
 
 
-def get_speedtest():
-    """Runs speedtest-cli and extracts ping, download, and upload speeds."""
-    # speedtest-cli uses python urllib which usually gets past basic proxy filters, 
+def get_speedtest(debug=False, retries=MAX_RETRIES):
+    """Runs speedtest-cli and extracts ping, download, and upload speeds with retry logic.
+    
+    Args:
+        debug (bool): If True, print debug information.
+        retries (int): Number of retries on failure.
+    
+    Returns:
+        dict: Dictionary with keys: ping, download, upload (all as floats). None if all retries fail.
+    """
+    # speedtest-cli uses python urllib which usually gets past basic proxy filters,
     # but we add --secure just in case it hits an HTTPS inspection proxy at work.
-    try:
-        res = subprocess.run(
-            ["speedtest-cli", "--simple", "--secure"], capture_output=True, text=True, timeout=60
-        )
-        ping_m = re.search(r"Ping:\s*([0-9.]+)", res.stdout)
-        dl_m = re.search(r"Download:\s*([0-9.]+)", res.stdout)
-        ul_m = re.search(r"Upload:\s*([0-9.]+)", res.stdout)
+    for attempt in range(retries + 1):
+        try:
+            res = subprocess.run(
+                ["speedtest-cli", "--simple", "--secure"], capture_output=True, text=True, timeout=60
+            )
+            ping_m = re.search(r"Ping:\s*([0-9.]+)", res.stdout)
+            dl_m = re.search(r"Download:\s*([0-9.]+)", res.stdout)
+            ul_m = re.search(r"Upload:\s*([0-9.]+)", res.stdout)
 
-        return {
-            "ping": float(ping_m.group(1)) if ping_m else None,
-            "download": float(dl_m.group(1)) if dl_m else None,
-            "upload": float(ul_m.group(1)) if ul_m else None,
-        }
-    except Exception:
-        return None
+            if dl_m:  # Only return if we got at least download speed
+                return {
+                    "ping": float(ping_m.group(1)) if ping_m else None,
+                    "download": float(dl_m.group(1)) if dl_m else None,
+                    "upload": float(ul_m.group(1)) if ul_m else None,
+                }
+        except Exception as e:
+            if debug:
+                print(f"{C.YELLOW}[DEBUG] Speedtest attempt {attempt + 1} failed: {e}{C.RESET}")
+            if attempt < retries:
+                time.sleep(2)  # Wait before retry
+    return None
 
 
-def get_fastcom():
-    """Fetches fast.com download speed directly via curl, spoofing a browser."""
-    try:
-        html = subprocess.run(["curl", "-s", "-L", "-A", USER_AGENT, "https://fast.com"], capture_output=True, text=True, timeout=10).stdout
-        js_path = re.search(r'src="(/app-[a-f0-9]+\.js)"', html)
-        if not js_path: return None
+def get_fastcom(debug=False, retries=MAX_RETRIES):
+    """Fetches fast.com download speed directly via curl, spoofing a browser with retry logic.
+    
+    Args:
+        debug (bool): If True, print debug information.
+        retries (int): Number of retries on failure.
+    
+    Returns:
+        dict: Dictionary with key: download (as float). None if all retries fail.
+    """
+    for attempt in range(retries + 1):
+        try:
+            html = subprocess.run(["curl", "-s", "-L", "-A", USER_AGENT, "https://fast.com"], capture_output=True, text=True, timeout=10).stdout
+            js_path = re.search(r'src="(/app-[a-f0-9]+\.js)"', html)
+            if not js_path: raise ValueError("JavaScript file not found")
 
-        js_url = f"https://fast.com{js_path.group(1)}"
-        js_content = subprocess.run(["curl", "-s", "-L", "-A", USER_AGENT, js_url], capture_output=True, text=True, timeout=10).stdout
-        token = re.search(r'token:"([A-Za-z0-9]+)"', js_content)
-        if not token: return None
+            js_url = f"https://fast.com{js_path.group(1)}"
+            js_content = subprocess.run(["curl", "-s", "-L", "-A", USER_AGENT, js_url], capture_output=True, text=True, timeout=10).stdout
+            token = re.search(r'token:"([A-Za-z0-9]+)"', js_content)
+            if not token: raise ValueError("Token not found in JavaScript")
 
-        api_url = f"https://api.fast.com/netflix/speedtest/v2?https=true&token={token.group(1)}&urlCount=3"
-        api_res = subprocess.run(["curl", "-s", "-L", "-A", USER_AGENT, api_url], capture_output=True, text=True, timeout=10).stdout
-        data = json.loads(api_res)
+            api_url = f"https://api.fast.com/netflix/speedtest/v2?https=true&token={token.group(1)}&urlCount=3"
+            api_res = subprocess.run(["curl", "-s", "-L", "-A", USER_AGENT, api_url], capture_output=True, text=True, timeout=10).stdout
+            data = json.loads(api_res)
 
-        targets = [item["url"] for item in data.get("targets", [])]
-        if not targets: return None
+            targets = [item["url"] for item in data.get("targets", [])]
+            if not targets: raise ValueError("No targets found")
 
-        start_time = time.time()
-        # Ensure the actual file download request also uses the User Agent
-        res = subprocess.run(["curl", "-s", "-L", "-A", USER_AGENT, "-r", "0-25000000", "-o", "/dev/null", targets[0]], timeout=15)
-        elapsed = time.time() - start_time
-        
-        if elapsed > 0 and res.returncode == 0:
-            mbps = (25000000 * 8) / (elapsed * 1000000)
-            return {"download": round(mbps, 2)}
-    except Exception:
-        pass
+            start_time = time.time()
+            # Ensure the actual file download request also uses the User Agent
+            res = subprocess.run(["curl", "-s", "-L", "-A", USER_AGENT, "-r", "0-25000000", "-o", "/dev/null", targets[0]], timeout=15)
+            elapsed = time.time() - start_time
+            
+            if elapsed > 0 and res.returncode == 0:
+                mbps = (25000000 * 8) / (elapsed * 1000000)
+                return {"download": round(mbps, 2)}
+        except Exception as e:
+            if debug:
+                print(f"{C.YELLOW}[DEBUG] Fast.com attempt {attempt + 1} failed: {e}{C.RESET}")
+            if attempt < retries:
+                time.sleep(2)  # Wait before retry
     return None
 
 
 def calculate_jitter(latency_list):
-    """Calculates network jitter (average variance between successive tests)."""
+    """Calculates network jitter as average variance between successive latency measurements.
+    
+    Args:
+        latency_list (list): List of latency measurements in milliseconds.
+    
+    Returns:
+        float: Average jitter value. 0.0 if less than 2 samples.
+    """
     if len(latency_list) < 2: return 0.0
     diffs = [abs(latency_list[i] - latency_list[i - 1]) for i in range(1, len(latency_list))]
     return round(sum(diffs) / len(diffs), 2)
 
 
+def validate_file_path(filepath, mode='w', debug=False):
+    """Validates that a file path is writable and directory exists.
+    
+    Args:
+        filepath (str): Path to validate.
+        mode (str): 'r' for read, 'w' for write.
+        debug (bool): If True, print debug information.
+    
+    Returns:
+        bool: True if valid, False otherwise.
+    """
+    try:
+        dirpath = os.path.dirname(filepath)
+        if dirpath and not os.path.exists(dirpath):
+            os.makedirs(dirpath, exist_ok=True)
+            if debug:
+                print(f"{C.BLUE}[i] Created directory: {dirpath}{C.RESET}")
+        
+        if mode == 'w':
+            # Test if we can write
+            with open(filepath, 'a'):
+                pass
+        return True
+    except Exception as e:
+        if debug:
+            print(f"{C.YELLOW}[DEBUG] File path validation failed: {e}{C.RESET}")
+        return False
+
+
 def run_benchmark():
+    """Main benchmark orchestration function. Runs all tests and exports results."""
     # --- Parse CLI Arguments ---
-    parser = argparse.ArgumentParser(description="Network Speed Benchmark Tool by Shadowharvy")
-    parser.add_argument("-n", "--runs", type=int, default=5, help="Number of benchmark iterations (default: 5)")
+    parser = argparse.ArgumentParser(
+        description="Network Speed Benchmark Tool by Shadowharvy",
+        epilog="Example: python3 speedtest.sh --runs 3 --json results.json"
+    )
+    parser.add_argument("-n", "--runs", type=int, default=3, help="Number of benchmark iterations (default: 3)")
     parser.add_argument("--quiet", action="store_true", help="Suppress progress output, show only summary")
     parser.add_argument("--no-color", action="store_true", help="Disable ANSI color output")
     parser.add_argument("--json", type=str, metavar="FILE", help="Export results to a JSON file")
     parser.add_argument("--csv", type=str, metavar="FILE", help="Export results to a CSV file")
+    parser.add_argument("--debug", action="store_true", help="Enable debug output for troubleshooting")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}", help="Show version and exit")
     args = parser.parse_args()
+
+    # Validate arguments
+    if args.runs < 1 or args.runs > 20:
+        print(f"{C.RED}[!] Error: --runs must be between 1 and 20{C.RESET}")
+        return 1
+    
+    # Validate file paths
+    if args.json and not validate_file_path(args.json, debug=args.debug):
+        print(f"{C.RED}[!] Error: Cannot write to JSON file: {args.json}{C.RESET}")
+        return 1
+    
+    if args.csv and not validate_file_path(args.csv, debug=args.debug):
+        print(f"{C.RED}[!] Error: Cannot write to CSV file: {args.csv}{C.RESET}")
+        return 1
 
     if args.no_color:
         C.disable()
 
     print_banner(args.quiet)
+    
+    if args.debug:
+        print(f"{C.BLUE}[DEBUG] Debug mode enabled. Version: {VERSION}{C.RESET}")
+        print(f"{C.BLUE}[DEBUG] Runs configured: {args.runs}{C.RESET}\n")
 
     # --- Pre-Flight Checks ---
-    st_ok, fast_ok = check_endpoints(args.quiet)
+    st_ok, fast_ok = check_endpoints(args.quiet, args.debug)
 
     # --- Fetching Network Info ---
     if not args.quiet: print(f"{C.BLUE}[i] Fetching Network Interfaces & Geolocation...{C.RESET}")
-    lan_ip = get_lan_ip()
-    geo = get_geo_info()
+    lan_ip = get_lan_ip(args.debug)
+    geo = get_geo_info(args.debug)
     
     if not args.quiet:
         print(f"    {C.BOLD}Local IP (LAN):{C.RESET} {C.YELLOW}{lan_ip}{C.RESET}")
@@ -220,7 +342,7 @@ def run_benchmark():
         if not args.quiet: print(f"{C.CYAN}{C.BOLD}--- Running Speedtest.net (Ookla) Benchmark ---{C.RESET}")
         for i in range(1, args.runs + 1):
             if not args.quiet: print(f"  Run {i}/{args.runs}... ", end="", flush=True)
-            res = get_speedtest()
+            res = get_speedtest(args.debug, MAX_RETRIES)
             if res and res.get("download"):
                 st_results.append(res)
                 if not args.quiet:
@@ -236,7 +358,7 @@ def run_benchmark():
         if not args.quiet: print(f"\n{C.CYAN}{C.BOLD}--- Running Fast.com (Netflix CDN) Benchmark ---{C.RESET}")
         for i in range(1, args.runs + 1):
             if not args.quiet: print(f"  Run {i}/{args.runs}... ", end="", flush=True)
-            res = get_fastcom()
+            res = get_fastcom(args.debug, MAX_RETRIES)
             if res and res.get("download"):
                 fast_results.append(res)
                 if not args.quiet:
@@ -298,6 +420,9 @@ def run_benchmark():
         "raw_results": {"speedtest": st_results, "fast": fast_results}
     }
 
+    # --- Data Export with Error Handling ---
+    exit_code = 0
+    
     if args.json:
         try:
             with open(args.json, "w") as f:
@@ -305,6 +430,7 @@ def run_benchmark():
             if not args.quiet: print(f"{C.GREEN}[✔] JSON data exported to {args.json}{C.RESET}")
         except Exception as e:
             print(f"{C.RED}[!] Failed to write JSON: {e}{C.RESET}")
+            exit_code = 1
 
     if args.csv:
         try:
@@ -318,7 +444,14 @@ def run_benchmark():
             if not args.quiet: print(f"{C.GREEN}[✔] CSV data exported to {args.csv}{C.RESET}")
         except Exception as e:
             print(f"{C.RED}[!] Failed to write CSV: {e}{C.RESET}")
+            exit_code = 1
+    
+    # Return exit code (success if any test ran, failure if all blocked)
+    if not st_ok and not fast_ok:
+        return 2  # All services blocked
+    
+    return exit_code
 
 
 if __name__ == "__main__":
-    run_benchmark()
+    sys.exit(run_benchmark())
