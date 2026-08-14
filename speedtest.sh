@@ -16,13 +16,54 @@ import subprocess
 import sys
 import time
 from datetime import datetime
+from urllib.request import urlopen
+from urllib.error import URLError, HTTPError
 
 # --- Version & Constants ---
 VERSION = "1.2.0"
 MAX_RETRIES = 2
 
+# Timeout constants (in seconds)
+HTTP_TIMEOUT = 5
+DOWNLOAD_TIMEOUT = 15
+CHECK_TIMEOUT = 4
+
 # Spoof a standard Google Chrome browser to bypass Corporate Firewall User-Agent filtering
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+# Pre-compiled regex patterns for performance
+JS_PATH_PATTERN = re.compile(r'src="(/app-[a-f0-9]+\.js)"')
+TOKEN_PATTERN = re.compile(r'token:"([A-Za-z0-9]+)"')
+
+def make_http_request(url, user_agent=USER_AGENT, timeout=HTTP_TIMEOUT, debug=False):
+    """Make HTTP request using curl via subprocess with proper error handling.
+    
+    Args:
+        url (str): URL to request.
+        user_agent (str): User-Agent header.
+        timeout (int): Request timeout in seconds.
+        debug (bool): If True, print debug information on failure.
+    
+    Returns:
+        str: Response body or None on failure.
+    """
+    try:
+        res = subprocess.run(
+            ["curl", "-s", "-L", "-A", user_agent, "--max-time", str(timeout), url],
+            capture_output=True,
+            text=True,
+            timeout=timeout + 2  # Give subprocess extra time
+        )
+        if res.returncode == 0:
+            return res.stdout
+    except subprocess.TimeoutExpired:
+        if debug:
+            print(f"{C.YELLOW}[DEBUG] HTTP request timeout for {url}{C.RESET}")
+    except Exception as e:
+        if debug:
+            print(f"{C.YELLOW}[DEBUG] HTTP request failed for {url}: {e}{C.RESET}")
+    return None
+
 
 class C:
     """ANSI color codes for terminal output styling."""
@@ -73,32 +114,28 @@ def check_endpoints(quiet, debug=False):
     fast_ok = False
 
     # Deep Check Speedtest.net
-    try:
-        res_st = subprocess.run(
-            ["curl", "-s", "-L", "-A", USER_AGENT, "--max-time", "4", "https://www.speedtest.net/speedtest-config.php"], 
-            capture_output=True, 
-            text=True
-        )
-        if res_st.returncode == 0 and "client" in res_st.stdout:
-            st_ok = True
-    except Exception:
-        pass
+    res_st = make_http_request(
+        "https://www.speedtest.net/speedtest-config.php",
+        timeout=CHECK_TIMEOUT,
+        debug=debug
+    )
+    if res_st and "client" in res_st:
+        st_ok = True
 
     # Deep Check Fast.com
-    try:
-        html = subprocess.run(["curl", "-s", "-L", "-A", USER_AGENT, "--max-time", "4", "https://fast.com"], capture_output=True, text=True).stdout
-        js_path = re.search(r'src="(/app-[a-f0-9]+\.js)"', html)
+    html = make_http_request("https://fast.com", timeout=CHECK_TIMEOUT, debug=debug)
+    if html:
+        js_path = JS_PATH_PATTERN.search(html)
         if js_path:
             js_url = f"https://fast.com{js_path.group(1)}"
-            js_content = subprocess.run(["curl", "-s", "-L", "-A", USER_AGENT, "--max-time", "4", js_url], capture_output=True, text=True).stdout
-            token = re.search(r'token:"([A-Za-z0-9]+)"', js_content)
-            if token:
-                api_url = f"https://api.fast.com/netflix/speedtest/v2?https=true&token={token.group(1)}&urlCount=1"
-                api_res = subprocess.run(["curl", "-s", "-L", "-A", USER_AGENT, "--max-time", "4", api_url], capture_output=True, text=True).stdout
-                if "targets" in api_res:
-                    fast_ok = True
-    except Exception:
-        pass
+            js_content = make_http_request(js_url, timeout=CHECK_TIMEOUT, debug=debug)
+            if js_content:
+                token = TOKEN_PATTERN.search(js_content)
+                if token:
+                    api_url = f"https://api.fast.com/netflix/speedtest/v2?https=true&token={token.group(1)}&urlCount=1"
+                    api_res = make_http_request(api_url, timeout=CHECK_TIMEOUT, debug=debug)
+                    if api_res and "targets" in api_res:
+                        fast_ok = True
 
     if not quiet:
         st_status = f"{C.GREEN}Accessible{C.RESET}" if st_ok else f"{C.RED}Blocked/Unreachable{C.RESET}"
@@ -119,13 +156,12 @@ def get_lan_ip(debug=False):
         str: Local IP address or 'Unavailable' if detection fails.
     """
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(2)
-        s.connect(("1.1.1.1", 80))
-        lan_ip = s.getsockname()[0]
-        s.close()
-        return lan_ip
-    except Exception as e:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(2)
+            s.connect(("1.1.1.1", 80))
+            lan_ip = s.getsockname()[0]
+            return lan_ip
+    except (socket.error, OSError) as e:
         if debug:
             print(f"{C.YELLOW}[DEBUG] Failed to get LAN IP: {e}{C.RESET}")
         return "Unavailable"
@@ -141,20 +177,19 @@ def get_geo_info(debug=False):
         dict: Dictionary with keys: ip, isp, city, country. Defaults to 'Unavailable'/'Unknown' on failure.
     """
     try:
-        res = subprocess.run(
-            ["curl", "-s", "-A", USER_AGENT, "--max-time", "5", "http://ip-api.com/json/"],
-            capture_output=True,
-            text=True,
-        )
-        if res.returncode == 0:
-            data = json.loads(res.stdout)
-            if data.get("status") == "success":
+        res = make_http_request("http://ip-api.com/json/", timeout=HTTP_TIMEOUT, debug=debug)
+        if res:
+            data = json.loads(res)
+            if isinstance(data, dict) and data.get("status") == "success":
                 return {
                     "ip": data.get("query", "Unavailable"),
                     "isp": data.get("isp", "Unknown ISP"),
                     "city": data.get("city", "Unknown"),
                     "country": data.get("country", "Unknown")
                 }
+    except (json.JSONDecodeError, ValueError) as e:
+        if debug:
+            print(f"{C.YELLOW}[DEBUG] Failed to parse geolocation response: {e}{C.RESET}")
     except Exception as e:
         if debug:
             print(f"{C.YELLOW}[DEBUG] Failed to get geolocation: {e}{C.RESET}")
@@ -208,35 +243,57 @@ def get_fastcom(debug=False, retries=MAX_RETRIES):
     """
     for attempt in range(retries + 1):
         try:
-            html = subprocess.run(["curl", "-s", "-L", "-A", USER_AGENT, "https://fast.com"], capture_output=True, text=True, timeout=10).stdout
-            js_path = re.search(r'src="(/app-[a-f0-9]+\.js)"', html)
-            if not js_path: raise ValueError("JavaScript file not found")
+            html = make_http_request("https://fast.com", timeout=HTTP_TIMEOUT, debug=debug)
+            if not html:
+                raise ValueError("Failed to fetch fast.com homepage")
+            
+            js_path = JS_PATH_PATTERN.search(html)
+            if not js_path:
+                raise ValueError("JavaScript file not found")
 
             js_url = f"https://fast.com{js_path.group(1)}"
-            js_content = subprocess.run(["curl", "-s", "-L", "-A", USER_AGENT, js_url], capture_output=True, text=True, timeout=10).stdout
-            token = re.search(r'token:"([A-Za-z0-9]+)"', js_content)
-            if not token: raise ValueError("Token not found in JavaScript")
+            js_content = make_http_request(js_url, timeout=HTTP_TIMEOUT, debug=debug)
+            if not js_content:
+                raise ValueError("Failed to fetch JavaScript")
+            
+            token = TOKEN_PATTERN.search(js_content)
+            if not token:
+                raise ValueError("Token not found in JavaScript")
 
             api_url = f"https://api.fast.com/netflix/speedtest/v2?https=true&token={token.group(1)}&urlCount=3"
-            api_res = subprocess.run(["curl", "-s", "-L", "-A", USER_AGENT, api_url], capture_output=True, text=True, timeout=10).stdout
+            api_res = make_http_request(api_url, timeout=HTTP_TIMEOUT, debug=debug)
+            if not api_res:
+                raise ValueError("Failed to fetch API targets")
+            
             data = json.loads(api_res)
+            if not isinstance(data, dict):
+                raise ValueError("Invalid API response format")
 
-            targets = [item["url"] for item in data.get("targets", [])]
-            if not targets: raise ValueError("No targets found")
+            targets = [item.get("url") for item in data.get("targets", []) if isinstance(item, dict) and "url" in item]
+            if not targets:
+                raise ValueError("No valid targets found")
 
             start_time = time.time()
             # Ensure the actual file download request also uses the User Agent
-            res = subprocess.run(["curl", "-s", "-L", "-A", USER_AGENT, "-r", "0-25000000", "-o", "/dev/null", targets[0]], timeout=15)
+            res = subprocess.run(
+                ["curl", "-s", "-L", "-A", USER_AGENT, "-r", "0-25000000", "-o", "/dev/null", targets[0]],
+                timeout=DOWNLOAD_TIMEOUT
+            )
             elapsed = time.time() - start_time
             
             if elapsed > 0 and res.returncode == 0:
                 mbps = (25000000 * 8) / (elapsed * 1000000)
                 return {"download": round(mbps, 2)}
-        except Exception as e:
+        except (json.JSONDecodeError, ValueError, subprocess.TimeoutExpired) as e:
             if debug:
                 print(f"{C.YELLOW}[DEBUG] Fast.com attempt {attempt + 1} failed: {e}{C.RESET}")
             if attempt < retries:
                 time.sleep(2)  # Wait before retry
+        except Exception as e:
+            if debug:
+                print(f"{C.YELLOW}[DEBUG] Fast.com attempt {attempt + 1} failed unexpectedly: {e}{C.RESET}")
+            if attempt < retries:
+                time.sleep(2)
     return None
 
 
