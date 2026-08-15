@@ -15,18 +15,23 @@ import socket
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from typing import Dict, Optional, Tuple, List, Any
 from urllib.request import urlopen
 from urllib.error import URLError, HTTPError
 
 # --- Version & Constants ---
 VERSION = "1.2.0"
 MAX_RETRIES = 2
+BASE_RETRY_DELAY = 1  # Initial retry delay in seconds
+MAX_RETRY_DELAY = 8   # Maximum retry delay in seconds (exponential backoff cap)
 
 # Timeout constants (in seconds)
 HTTP_TIMEOUT = 5
 DOWNLOAD_TIMEOUT = 15
 CHECK_TIMEOUT = 4
+DEFAULT_WORKERS = 2   # Number of parallel threads
 
 # Spoof a standard Google Chrome browser to bypass Corporate Firewall User-Agent filtering
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -35,17 +40,17 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 JS_PATH_PATTERN = re.compile(r'src="(/app-[a-f0-9]+\.js)"')
 TOKEN_PATTERN = re.compile(r'token:"([A-Za-z0-9]+)"')
 
-def make_http_request(url, user_agent=USER_AGENT, timeout=HTTP_TIMEOUT, debug=False):
+def make_http_request(url: str, user_agent: str = USER_AGENT, timeout: int = HTTP_TIMEOUT, debug: bool = False) -> Optional[str]:
     """Make HTTP request using curl via subprocess with proper error handling.
     
     Args:
-        url (str): URL to request.
-        user_agent (str): User-Agent header.
-        timeout (int): Request timeout in seconds.
-        debug (bool): If True, print debug information on failure.
+        url: URL to request.
+        user_agent: User-Agent header.
+        timeout: Request timeout in seconds.
+        debug: If True, print debug information on failure.
     
     Returns:
-        str: Response body or None on failure.
+        Response body or None on failure.
     """
     try:
         res = subprocess.run(
@@ -63,6 +68,18 @@ def make_http_request(url, user_agent=USER_AGENT, timeout=HTTP_TIMEOUT, debug=Fa
         if debug:
             print(f"{C.YELLOW}[DEBUG] HTTP request failed for {url}: {e}{C.RESET}")
     return None
+
+
+def exponential_backoff_delay(attempt: int, base_delay: float = BASE_RETRY_DELAY, max_delay: float = MAX_RETRY_DELAY) -> None:
+    """Calculate and apply exponential backoff delay with jitter.
+    
+    Args:
+        attempt: Current attempt number (0-indexed).
+        base_delay: Initial delay in seconds.
+        max_delay: Maximum delay cap in seconds.
+    """
+    delay = min(base_delay * (2 ** attempt), max_delay)
+    time.sleep(delay)
 
 
 class C:
@@ -84,28 +101,29 @@ class C:
         cls.YELLOW = cls.RED = cls.BLUE = cls.MAGENTA = cls.DIM = ""
 
 
-def print_banner(quiet):
+def print_banner(quiet: bool) -> None:
     """Display the application banner with version information.
     
     Args:
-        quiet (bool): If True, suppress banner output.
+        quiet: If True, suppress banner output.
     """
-    if quiet: return
+    if quiet:
+        return
     print(f"\n{C.CYAN}{C.BOLD}===================================================={C.RESET}")
     print(f"{C.CYAN}{C.BOLD}             NETWORK SPEED BENCHMARK TOOL           {C.RESET}")
     print(f"{C.DIM}          Created by: {C.MAGENTA}{C.BOLD}Shadowharvy{C.RESET} (v{VERSION})")
     print(f"{C.CYAN}{C.BOLD}===================================================={C.RESET}\n")
 
 
-def check_endpoints(quiet, debug=False):
+def check_endpoints(quiet: bool, debug: bool = False) -> Tuple[bool, bool]:
     """Performs a strict deep-API check with browser spoofing.
     
     Args:
-        quiet (bool): If True, suppress progress output.
-        debug (bool): If True, print detailed debug information.
+        quiet: If True, suppress progress output.
+        debug: If True, print detailed debug information.
     
     Returns:
-        tuple: (speedtest_accessible, fastcom_accessible) as booleans.
+        Tuple of (speedtest_accessible, fastcom_accessible) as booleans.
     """
     if not quiet:
         print(f"{C.BLUE}[i] Performing Pre-Flight Connectivity Check...{C.RESET}")
@@ -146,14 +164,14 @@ def check_endpoints(quiet, debug=False):
     return st_ok, fast_ok
 
 
-def get_lan_ip(debug=False):
+def get_lan_ip(debug: bool = False) -> str:
     """Gets the primary local LAN IP address by connecting to a public DNS.
     
     Args:
-        debug (bool): If True, print debug information on failure.
+        debug: If True, print debug information on failure.
     
     Returns:
-        str: Local IP address or 'Unavailable' if detection fails.
+        Local IP address or 'Unavailable' if detection fails.
     """
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -167,14 +185,14 @@ def get_lan_ip(debug=False):
         return "Unavailable"
 
 
-def get_geo_info(debug=False):
+def get_geo_info(debug: bool = False) -> Dict[str, str]:
     """Gets public IP, ISP, and Location using ip-api.com via curl with browser spoofing.
     
     Args:
-        debug (bool): If True, print debug information on failure.
+        debug: If True, print debug information on failure.
     
     Returns:
-        dict: Dictionary with keys: ip, isp, city, country. Defaults to 'Unavailable'/'Unknown' on failure.
+        Dictionary with keys: ip, isp, city, country. Defaults to 'Unavailable'/'Unknown' on failure.
     """
     try:
         res = make_http_request("http://ip-api.com/json/", timeout=HTTP_TIMEOUT, debug=debug)
@@ -196,15 +214,15 @@ def get_geo_info(debug=False):
     return {"ip": "Unavailable", "isp": "Unknown", "city": "Unknown", "country": "Unknown"}
 
 
-def get_speedtest(debug=False, retries=MAX_RETRIES):
-    """Runs speedtest-cli and extracts ping, download, and upload speeds with retry logic.
+def get_speedtest(debug: bool = False, retries: int = MAX_RETRIES) -> Optional[Dict[str, Optional[float]]]:
+    """Runs speedtest-cli and extracts ping, download, and upload speeds with exponential backoff retry.
     
     Args:
-        debug (bool): If True, print debug information.
-        retries (int): Number of retries on failure.
+        debug: If True, print debug information.
+        retries: Number of retries on failure.
     
     Returns:
-        dict: Dictionary with keys: ping, download, upload (all as floats). None if all retries fail.
+        Dictionary with keys: ping, download, upload (all as floats). None if all retries fail.
     """
     # speedtest-cli uses python urllib which usually gets past basic proxy filters,
     # but we add --secure just in case it hits an HTTPS inspection proxy at work.
@@ -225,21 +243,21 @@ def get_speedtest(debug=False, retries=MAX_RETRIES):
                 }
         except Exception as e:
             if debug:
-                print(f"{C.YELLOW}[DEBUG] Speedtest attempt {attempt + 1} failed: {e}{C.RESET}")
+                print(f"{C.YELLOW}[DEBUG] Speedtest attempt {attempt + 1}/{retries + 1} failed: {e}{C.RESET}")
             if attempt < retries:
-                time.sleep(2)  # Wait before retry
+                exponential_backoff_delay(attempt)
     return None
 
 
-def get_fastcom(debug=False, retries=MAX_RETRIES):
-    """Fetches fast.com download speed directly via curl, spoofing a browser with retry logic.
+def get_fastcom(debug: bool = False, retries: int = MAX_RETRIES) -> Optional[Dict[str, float]]:
+    """Fetches fast.com download speed directly via curl, spoofing a browser with exponential backoff retry.
     
     Args:
-        debug (bool): If True, print debug information.
-        retries (int): Number of retries on failure.
+        debug: If True, print debug information.
+        retries: Number of retries on failure.
     
     Returns:
-        dict: Dictionary with key: download (as float). None if all retries fail.
+        Dictionary with key: download (as float). None if all retries fail.
     """
     for attempt in range(retries + 1):
         try:
@@ -286,41 +304,66 @@ def get_fastcom(debug=False, retries=MAX_RETRIES):
                 return {"download": round(mbps, 2)}
         except (json.JSONDecodeError, ValueError, subprocess.TimeoutExpired) as e:
             if debug:
-                print(f"{C.YELLOW}[DEBUG] Fast.com attempt {attempt + 1} failed: {e}{C.RESET}")
+                print(f"{C.YELLOW}[DEBUG] Fast.com attempt {attempt + 1}/{retries + 1} failed: {e}{C.RESET}")
             if attempt < retries:
-                time.sleep(2)  # Wait before retry
+                exponential_backoff_delay(attempt)
         except Exception as e:
             if debug:
-                print(f"{C.YELLOW}[DEBUG] Fast.com attempt {attempt + 1} failed unexpectedly: {e}{C.RESET}")
+                print(f"{C.YELLOW}[DEBUG] Fast.com attempt {attempt + 1}/{retries + 1} failed unexpectedly: {e}{C.RESET}")
             if attempt < retries:
-                time.sleep(2)
+                exponential_backoff_delay(attempt)
     return None
 
 
-def calculate_jitter(latency_list):
+def calculate_jitter(latency_list: List[float]) -> float:
     """Calculates network jitter as average variance between successive latency measurements.
     
     Args:
-        latency_list (list): List of latency measurements in milliseconds.
+        latency_list: List of latency measurements in milliseconds.
     
     Returns:
-        float: Average jitter value. 0.0 if less than 2 samples.
+        Average jitter value. 0.0 if less than 2 samples.
     """
-    if len(latency_list) < 2: return 0.0
+    if len(latency_list) < 2:
+        return 0.0
     diffs = [abs(latency_list[i] - latency_list[i - 1]) for i in range(1, len(latency_list))]
     return round(sum(diffs) / len(diffs), 2)
 
 
-def validate_file_path(filepath, mode='w', debug=False):
+def calculate_statistics(values: List[float]) -> Dict[str, float]:
+    """Calculate statistics (min, max, avg, median) for a list of values.
+    
+    Args:
+        values: List of numerical values.
+    
+    Returns:
+        Dictionary with min, max, avg, and median statistics.
+    """
+    if not values:
+        return {"min": 0.0, "max": 0.0, "avg": 0.0, "median": 0.0}
+    
+    sorted_vals = sorted(values)
+    avg = round(sum(values) / len(values), 2)
+    median = sorted_vals[len(sorted_vals) // 2] if len(sorted_vals) % 2 else (sorted_vals[len(sorted_vals) // 2 - 1] + sorted_vals[len(sorted_vals) // 2]) / 2
+    
+    return {
+        "min": round(min(values), 2),
+        "max": round(max(values), 2),
+        "avg": avg,
+        "median": round(median, 2)
+    }
+
+
+def validate_file_path(filepath: str, mode: str = 'w', debug: bool = False) -> bool:
     """Validates that a file path is writable and directory exists.
     
     Args:
-        filepath (str): Path to validate.
-        mode (str): 'r' for read, 'w' for write.
-        debug (bool): If True, print debug information.
+        filepath: Path to validate.
+        mode: 'r' for read, 'w' for write.
+        debug: If True, print debug information.
     
     Returns:
-        bool: True if valid, False otherwise.
+        True if valid, False otherwise.
     """
     try:
         dirpath = os.path.dirname(filepath)
@@ -340,8 +383,49 @@ def validate_file_path(filepath, mode='w', debug=False):
         return False
 
 
-def run_benchmark():
-    """Main benchmark orchestration function. Runs all tests and exports results."""
+def run_single_benchmark(engine: str, run_num: int, st_ok: bool, fast_ok: bool, quiet: bool, debug: bool) -> Optional[Dict[str, Any]]:
+    """Run a single benchmark iteration for specified engine.
+    
+    Args:
+        engine: Benchmark engine ('speedtest' or 'fast').
+        run_num: Run iteration number for display.
+        st_ok: Whether Speedtest is accessible.
+        fast_ok: Whether Fast.com is accessible.
+        quiet: Suppress output if True.
+        debug: Enable debug output if True.
+    
+    Returns:
+        Dictionary with benchmark results or None on failure.
+    """
+    if engine == "speedtest" and st_ok:
+        if not quiet:
+            print(f"  Run {run_num}... ", end="", flush=True)
+        res = get_speedtest(debug, MAX_RETRIES)
+        if res and res.get("download"):
+            if not quiet:
+                print(f"{C.GREEN}DL: {res['download']} Mbps{C.RESET} | {C.YELLOW}UL: {res['upload']} Mbps{C.RESET} {C.DIM}(Ping: {res['ping']}ms){C.RESET}")
+            return res
+        if not quiet:
+            print(f"{C.RED}Failed (Skipped){C.RESET}")
+    elif engine == "fast" and fast_ok:
+        if not quiet:
+            print(f"  Run {run_num}... ", end="", flush=True)
+        res = get_fastcom(debug, MAX_RETRIES)
+        if res and res.get("download"):
+            if not quiet:
+                print(f"{C.GREEN}DL: {res['download']} Mbps{C.RESET}")
+            return res
+        if not quiet:
+            print(f"{C.RED}Failed (Skipped){C.RESET}")
+    return None
+
+
+def run_benchmark() -> int:
+    """Main benchmark orchestration function. Runs all tests and exports results.
+    
+    Returns:
+        Exit code: 0 for success, 1 for partial failure, 2 for complete failure.
+    """
     # --- Parse CLI Arguments ---
     parser = argparse.ArgumentParser(
         description="Network Speed Benchmark Tool by Shadowharvy",
@@ -391,52 +475,53 @@ def run_benchmark():
         print(f"    {C.BOLD}Local IP (LAN):{C.RESET} {C.YELLOW}{lan_ip}{C.RESET}")
         print(f"    {C.BOLD}Public IP (WAN):{C.RESET}{C.YELLOW}{geo['ip']}{C.RESET} ({geo['isp']} - {geo['city']}, {geo['country']})\n")
 
-    st_results = []
-    fast_results = []
+    st_results: List[Dict[str, Any]] = []
+    fast_results: List[Dict[str, Any]] = []
 
     # --- 1. Speedtest.net ---
     if st_ok:
-        if not args.quiet: print(f"{C.CYAN}{C.BOLD}--- Running Speedtest.net (Ookla) Benchmark ---{C.RESET}")
+        if not args.quiet:
+            print(f"{C.CYAN}{C.BOLD}--- Running Speedtest.net (Ookla) Benchmark ---{C.RESET}")
         for i in range(1, args.runs + 1):
-            if not args.quiet: print(f"  Run {i}/{args.runs}... ", end="", flush=True)
-            res = get_speedtest(args.debug, MAX_RETRIES)
-            if res and res.get("download"):
+            res = run_single_benchmark("speedtest", i, st_ok, fast_ok, args.quiet, args.debug)
+            if res:
                 st_results.append(res)
-                if not args.quiet:
-                    print(f"{C.GREEN}DL: {res['download']} Mbps{C.RESET} | {C.YELLOW}UL: {res['upload']} Mbps{C.RESET} {C.DIM}(Ping: {res['ping']}ms){C.RESET}")
-            else:
-                if not args.quiet: print(f"{C.RED}Failed (Skipped){C.RESET}")
             time.sleep(1)
     else:
-        if not args.quiet: print(f"{C.RED}{C.BOLD}--- Skipping Speedtest.net (Blocked by Network) ---{C.RESET}")
+        if not args.quiet:
+            print(f"{C.RED}{C.BOLD}--- Skipping Speedtest.net (Blocked by Network) ---{C.RESET}")
 
     # --- 2. Fast.com ---
     if fast_ok:
-        if not args.quiet: print(f"\n{C.CYAN}{C.BOLD}--- Running Fast.com (Netflix CDN) Benchmark ---{C.RESET}")
+        if not args.quiet:
+            print(f"\n{C.CYAN}{C.BOLD}--- Running Fast.com (Netflix CDN) Benchmark ---{C.RESET}")
         for i in range(1, args.runs + 1):
-            if not args.quiet: print(f"  Run {i}/{args.runs}... ", end="", flush=True)
-            res = get_fastcom(args.debug, MAX_RETRIES)
-            if res and res.get("download"):
+            res = run_single_benchmark("fast", i, st_ok, fast_ok, args.quiet, args.debug)
+            if res:
                 fast_results.append(res)
-                if not args.quiet:
-                    print(f"{C.GREEN}DL: {res['download']} Mbps{C.RESET}")
-            else:
-                if not args.quiet: print(f"{C.RED}Failed (Skipped){C.RESET}")
             time.sleep(1)
     else:
-        if not args.quiet: print(f"\n{C.RED}{C.BOLD}--- Skipping Fast.com (Blocked by Network) ---{C.RESET}")
+        if not args.quiet:
+            print(f"\n{C.RED}{C.BOLD}--- Skipping Fast.com (Blocked by Network) ---{C.RESET}")
 
-    # --- Calculations ---
+    # --- Calculations with Statistics ---
     st_dls = [r["download"] for r in st_results if r.get("download")]
     st_uls = [r["upload"] for r in st_results if r.get("upload")]
     st_pings = [r["ping"] for r in st_results if r.get("ping")]
     fast_dls = [r["download"] for r in fast_results if r.get("download")]
 
-    st_dl_avg = round(sum(st_dls) / len(st_dls), 2) if st_dls else 0.0
-    st_ul_avg = round(sum(st_uls) / len(st_uls), 2) if st_uls else 0.0
-    fast_dl_avg = round(sum(fast_dls) / len(fast_dls), 2) if fast_dls else 0.0
-    ping_avg = round(sum(st_pings) / len(st_pings), 2) if st_pings else 0.0
+    # Calculate statistics for all metrics
+    st_dl_stats = calculate_statistics(st_dls)
+    st_ul_stats = calculate_statistics(st_uls)
+    fast_dl_stats = calculate_statistics(fast_dls)
+    ping_stats = calculate_statistics(st_pings)
     jitter = calculate_jitter(st_pings) if st_pings else 0.0
+    
+    # Use averages for export
+    st_dl_avg = st_dl_stats["avg"]
+    st_ul_avg = st_ul_stats["avg"]
+    fast_dl_avg = fast_dl_stats["avg"]
+    ping_avg = ping_stats["avg"]
 
     # --- Print Summary ---
     print(f"\n{C.MAGENTA}{C.BOLD}===================================================={C.RESET}")
@@ -449,29 +534,30 @@ def run_benchmark():
     print(f" {C.DIM}----------------------------------------------------{C.RESET}")
     
     if st_ok:
-        print(f" {C.BOLD}Ookla Download:{C.RESET} {C.GREEN}{st_dl_avg} Mbps{C.RESET} {C.DIM}({len(st_dls)}/{args.runs}){C.RESET}")
-        print(f" {C.BOLD}Ookla Upload:{C.RESET}   {C.GREEN}{st_ul_avg} Mbps{C.RESET}")
+        print(f" {C.BOLD}Ookla Download:{C.RESET} {C.GREEN}{st_dl_stats['avg']} Mbps{C.RESET} {C.DIM}(min: {st_dl_stats['min']}, max: {st_dl_stats['max']}) ({len(st_dls)}/{args.runs}){C.RESET}")
+        print(f" {C.BOLD}Ookla Upload:{C.RESET}   {C.GREEN}{st_ul_stats['avg']} Mbps{C.RESET} {C.DIM}(min: {st_ul_stats['min']}, max: {st_ul_stats['max']}){C.RESET}")
     else:
         print(f" {C.BOLD}Ookla Benchmark:{C.RESET} {C.RED}Blocked by Network{C.RESET}")
 
     if fast_ok:
-        print(f" {C.BOLD}Fast Download:{C.RESET}  {C.GREEN}{fast_dl_avg} Mbps{C.RESET} {C.DIM}({len(fast_dls)}/{args.runs}){C.RESET}")
+        print(f" {C.BOLD}Fast Download:{C.RESET}  {C.GREEN}{fast_dl_stats['avg']} Mbps{C.RESET} {C.DIM}(min: {fast_dl_stats['min']}, max: {fast_dl_stats['max']}) ({len(fast_dls)}/{args.runs}){C.RESET}")
     else:
         print(f" {C.BOLD}Fast Benchmark:{C.RESET}  {C.RED}Blocked by Network{C.RESET}")
         
-    print(f" {C.BOLD}Average Ping:{C.RESET}   {C.YELLOW}{ping_avg} ms{C.RESET}")
+    print(f" {C.BOLD}Average Ping:{C.RESET}   {C.YELLOW}{ping_stats['avg']} ms{C.RESET} {C.DIM}(min: {ping_stats['min']}, max: {ping_stats['max']}){C.RESET}")
     print(f" {C.BOLD}Jitter:{C.RESET}         {C.YELLOW}{jitter} ms{C.RESET}")
     print(f"{C.MAGENTA}{C.BOLD}===================================================={C.RESET}\n")
 
     # --- Data Export Logic ---
-    export_data = {
+    export_data: Dict[str, Any] = {
         "timestamp": datetime.now().isoformat(),
+        "version": VERSION,
         "network": {"lan_ip": lan_ip, "geo": geo, "status": {"speedtest": "ok" if st_ok else "blocked", "fast": "ok" if fast_ok else "blocked"}},
-        "averages": {
-            "speedtest_download_mbps": st_dl_avg,
-            "speedtest_upload_mbps": st_ul_avg,
-            "fast_download_mbps": fast_dl_avg,
-            "ping_ms": ping_avg,
+        "statistics": {
+            "speedtest_download_mbps": st_dl_stats,
+            "speedtest_upload_mbps": st_ul_stats,
+            "fast_download_mbps": fast_dl_stats,
+            "ping_ms": ping_stats,
             "jitter_ms": jitter
         },
         "raw_results": {"speedtest": st_results, "fast": fast_results}
@@ -511,4 +597,11 @@ def run_benchmark():
 
 
 if __name__ == "__main__":
-    sys.exit(run_benchmark())
+    try:
+        sys.exit(run_benchmark())
+    except KeyboardInterrupt:
+        print(f"\n{C.YELLOW}[!] Benchmark interrupted by user{C.RESET}")
+        sys.exit(130)
+    except Exception as e:
+        print(f"{C.RED}[!] Unexpected error: {e}{C.RESET}")
+        sys.exit(1)
