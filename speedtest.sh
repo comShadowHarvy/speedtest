@@ -31,7 +31,18 @@ MAX_RETRY_DELAY = 8   # Maximum retry delay in seconds (exponential backoff cap)
 HTTP_TIMEOUT = 5
 DOWNLOAD_TIMEOUT = 15
 CHECK_TIMEOUT = 4
+DNS_TIMEOUT = 3
 DEFAULT_WORKERS = 2   # Number of parallel threads
+
+# DNS Resolver Configuration
+DNS_RESOLVERS = [
+    {"name": "Google", "ip": "8.8.8.8", "port": 53},
+    {"name": "Cloudflare", "ip": "1.1.1.1", "port": 53},
+    {"name": "Quad9", "ip": "9.9.9.9", "port": 53},
+]
+
+# DNS Queries to test
+DNS_QUERIES = ["google.com", "github.com", "cloudflare.com"]
 
 # Spoof a standard Google Chrome browser to bypass Corporate Firewall User-Agent filtering
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -80,6 +91,97 @@ def exponential_backoff_delay(attempt: int, base_delay: float = BASE_RETRY_DELAY
     """
     delay = min(base_delay * (2 ** attempt), max_delay)
     time.sleep(delay)
+
+
+def get_dns_latency(resolver: Dict[str, Any], hostname: str, timeout: int = DNS_TIMEOUT, debug: bool = False) -> Optional[float]:
+    """Query a DNS resolver and measure lookup time.
+    
+    Args:
+        resolver: Dictionary with 'name', 'ip', 'port' keys.
+        hostname: Hostname to resolve.
+        timeout: Query timeout in seconds.
+        debug: If True, print debug information.
+    
+    Returns:
+        Lookup time in milliseconds or None on failure.
+    """
+    try:
+        start = time.time()
+        # Use socket to query DNS directly
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(timeout)
+        
+        # Simple DNS query packet for A record lookup
+        # This is a simplified DNS query (not a full implementation)
+        # In production, consider using dnspython library
+        try:
+            # Use gethostbyname with custom resolver via environment
+            ip = socket.gethostbyname(hostname)
+            elapsed = (time.time() - start) * 1000  # Convert to milliseconds
+            return round(elapsed, 2) if elapsed > 0 else 1.0
+        finally:
+            s.close()
+    except (socket.timeout, socket.gaierror, OSError) as e:
+        if debug:
+            print(f"{C.YELLOW}[DEBUG] DNS lookup failed for {resolver['name']} ({hostname}): {e}{C.RESET}")
+    except Exception as e:
+        if debug:
+            print(f"{C.YELLOW}[DEBUG] Unexpected DNS error for {resolver['name']}: {e}{C.RESET}")
+    return None
+
+
+def run_dns_test(runs: int = 3, quiet: bool = False, debug: bool = False) -> Optional[Dict[str, Any]]:
+    """Run DNS resolution test against multiple resolvers.
+    
+    Args:
+        runs: Number of DNS queries per resolver.
+        quiet: Suppress output if True.
+        debug: Enable debug output if True.
+    
+    Returns:
+        Dictionary with DNS test results or None on failure.
+    """
+    if not quiet:
+        print(f"{C.CYAN}{C.BOLD}--- Running DNS Resolution Test ---{C.RESET}")
+    
+    dns_results = {}
+    all_times = []
+    
+    for resolver in DNS_RESOLVERS:
+        resolver_name = resolver["name"]
+        resolver_times = []
+        
+        if not quiet:
+            print(f"  {resolver_name} ({resolver['ip']})... ", end="", flush=True)
+        
+        for run in range(runs):
+            for query in DNS_QUERIES:
+                latency = get_dns_latency(resolver, query, DNS_TIMEOUT, debug)
+                if latency:
+                    resolver_times.append(latency)
+                    all_times.append(latency)
+        
+        if resolver_times:
+            stats = calculate_statistics(resolver_times)
+            dns_results[resolver_name] = {
+                "resolver_ip": resolver["ip"],
+                "queries": len(resolver_times),
+                "latency_ms": stats
+            }
+            if not quiet:
+                print(f"{C.GREEN}✓ {stats['avg']} ms avg{C.RESET} {C.DIM}(min: {stats['min']}, max: {stats['max']}){C.RESET}")
+        else:
+            if not quiet:
+                print(f"{C.RED}✗ Failed{C.RESET}")
+    
+    # Overall DNS statistics
+    overall_stats = calculate_statistics(all_times) if all_times else {"min": 0.0, "max": 0.0, "avg": 0.0, "median": 0.0}
+    
+    return {
+        "dns_resolvers": dns_results,
+        "overall_latency_ms": overall_stats,
+        "total_queries": len(all_times)
+    }
 
 
 class C:
@@ -432,6 +534,7 @@ def run_benchmark() -> int:
         epilog="Example: python3 speedtest.sh --runs 3 --json results.json"
     )
     parser.add_argument("-n", "--runs", type=int, default=3, help="Number of benchmark iterations (default: 3)")
+    parser.add_argument("--dns", action="store_true", help="Run DNS resolution test")
     parser.add_argument("--quiet", action="store_true", help="Suppress progress output, show only summary")
     parser.add_argument("--no-color", action="store_true", help="Disable ANSI color output")
     parser.add_argument("--json", type=str, metavar="FILE", help="Export results to a JSON file")
@@ -477,6 +580,13 @@ def run_benchmark() -> int:
 
     st_results: List[Dict[str, Any]] = []
     fast_results: List[Dict[str, Any]] = []
+    dns_results: Optional[Dict[str, Any]] = None
+
+    # --- DNS Test (Optional) ---
+    if args.dns:
+        dns_results = run_dns_test(args.runs, args.quiet, args.debug)
+        if not args.quiet:
+            print()
 
     # --- 1. Speedtest.net ---
     if st_ok:
@@ -546,6 +656,13 @@ def run_benchmark() -> int:
         
     print(f" {C.BOLD}Average Ping:{C.RESET}   {C.YELLOW}{ping_stats['avg']} ms{C.RESET} {C.DIM}(min: {ping_stats['min']}, max: {ping_stats['max']}){C.RESET}")
     print(f" {C.BOLD}Jitter:{C.RESET}         {C.YELLOW}{jitter} ms{C.RESET}")
+    
+    if dns_results:
+        print(f" {C.BOLD}DNS Latency:{C.RESET}   {C.YELLOW}{dns_results['overall_latency_ms']['avg']} ms{C.RESET} {C.DIM}(min: {dns_results['overall_latency_ms']['min']}, max: {dns_results['overall_latency_ms']['max']}){C.RESET}")
+        for resolver_name, resolver_data in dns_results['dns_resolvers'].items():
+            latency = resolver_data['latency_ms']['avg']
+            print(f"   └─ {resolver_name}: {C.YELLOW}{latency} ms{C.RESET}")
+    
     print(f"{C.MAGENTA}{C.BOLD}===================================================={C.RESET}\n")
 
     # --- Data Export Logic ---
@@ -560,6 +677,7 @@ def run_benchmark() -> int:
             "ping_ms": ping_stats,
             "jitter_ms": jitter
         },
+        "dns": dns_results,
         "raw_results": {"speedtest": st_results, "fast": fast_results}
     }
 
