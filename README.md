@@ -12,7 +12,7 @@ A cross-platform CLI tool for testing network speed, measuring connectivity, ana
 - **Network Quality & Suitability Scoring**: 0–100 overall score with Gaming (low lag), 4K/8K Streaming, and HD/4K Video Call readiness
 - **Optimal DNS Recommendation**: Compares UDP DNS latencies and suggests the fastest DNS server with percentage resolution speedup tips
 - **Bufferbloat / Loaded Latency**: Measures ping spikes under active transfer load and assigns grades ($A^+$ to $F$)
-- **Background DNS Resolution**: Asynchronous UDP latency measurements for Google (8.8.8.8), Cloudflare (1.1.1.1), and Quad9 (9.9.9.9)
+- **Background DNS Resolution**: Asynchronous UDP latency measurements for Local Gateway DNS (e.g. `192.168.1.1`), Google (8.8.8.8), Cloudflare (1.1.1.1), and Quad9 (9.9.9.9)
 - **Continuous Monitoring Mode (`--monitor`)**: Periodically logs speed benchmarks on a custom interval to track ISP performance over 24 hours
 - **Network Adapter & Wi-Fi Diagnostics**: Detects active network interface (`wlan0`, `eth0`), Gateway IP, Wi-Fi SSID, and Signal Quality
 - **Historical Benchmark Logs**: Auto-saves benchmark records to `~/.speedtest_history.json` with `--history` viewing

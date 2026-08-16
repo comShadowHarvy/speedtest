@@ -168,15 +168,20 @@ def get_dns_latency(resolver: Dict[str, Any], hostname: str, timeout: int = DNS_
     return None
 
 
-def run_dns_test(runs: int = 3, quiet: bool = False, debug: bool = False) -> Optional[Dict[str, Any]]:
-    """Run DNS resolution test against multiple resolvers."""
+def run_dns_test(runs: int = 3, quiet: bool = False, debug: bool = False, gateway_ip: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Run DNS resolution test against multiple resolvers including the local gateway."""
     if not quiet:
         print(f"{C.CYAN}{C.BOLD}--- Running DNS Resolution Test ---{C.RESET}")
     
+    resolvers_to_test = list(DNS_RESOLVERS)
+    if gateway_ip and gateway_ip not in ("Unknown", "Unavailable"):
+        if not any(r["ip"] == gateway_ip for r in resolvers_to_test):
+            resolvers_to_test.insert(0, {"name": f"Local Gateway ({gateway_ip})", "ip": gateway_ip, "port": 53})
+
     dns_results = {}
     all_times = []
     
-    for resolver in DNS_RESOLVERS:
+    for resolver in resolvers_to_test:
         resolver_name = resolver["name"]
         resolver_times = []
         
@@ -195,10 +200,10 @@ def run_dns_test(runs: int = 3, quiet: bool = False, debug: bool = False) -> Opt
                 "latency_ms": stats
             }
             if not quiet:
-                print(f"  {resolver_name} ({resolver['ip']})... {C.GREEN}✓ {stats['avg']} ms avg{C.RESET} {C.DIM}(min: {stats['min']}, max: {stats['max']}){C.RESET}")
+                print(f"  {resolver_name}... {C.GREEN}✓ {stats['avg']} ms avg{C.RESET} {C.DIM}(min: {stats['min']}, max: {stats['max']}){C.RESET}")
         else:
             if not quiet:
-                print(f"  {resolver_name} ({resolver['ip']})... {C.RED}✗ Failed{C.RESET}")
+                print(f"  {resolver_name}... {C.RED}✗ Failed{C.RESET}")
     
     overall_stats = calculate_statistics(all_times) if all_times else {"min": 0.0, "max": 0.0, "avg": 0.0, "median": 0.0}
     
@@ -966,7 +971,7 @@ def run_benchmark_cycle(args) -> int:
     if args.dns:
         if not args.quiet: print(f"{C.BLUE}[i] Starting Background DNS Resolution Test...{C.RESET}\n")
         dns_executor = ThreadPoolExecutor(max_workers=1)
-        dns_future = dns_executor.submit(run_dns_test, args.runs, True, args.debug)
+        dns_future = dns_executor.submit(run_dns_test, args.runs, True, args.debug, adapter.get("gateway"))
 
     # Ookla
     if st_ok:
