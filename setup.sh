@@ -45,9 +45,12 @@ else
 fi
 
 # Set executable permissions for the python benchmark
-if [ -f "speed_benchmark.py" ]; then
+if [ -f "speedtest.sh" ]; then
+    chmod +x speedtest.sh
+    echo "[+] Made speedtest.sh executable."
+elif [ -f "speed_benchmark.py" ]; then
     chmod +x speed_benchmark.py
     echo "[+] Made speed_benchmark.py executable."
 fi
 
-echo -e "\n[✔] Setup complete! Run your benchmark with: python speed_benchmark.py"
+echo -e "\n[✔] Setup complete! Run your benchmark with: python3 speedtest.sh or ./speedtest.sh"

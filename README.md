@@ -2,7 +2,7 @@
 
 A cross-platform CLI tool for testing network speed, measuring connectivity, and generating detailed reports with geolocation detection.
 
-**Version: 1.2.0** | Improved retry logic, debug mode, and input validation
+**Version: 1.5.7** | Asynchronous background DNS testing, direct UDP DNS resolver latency measurements, improved setup script, and bug fixes
 
 ## Features
 
@@ -87,6 +87,7 @@ python3 speedtest.sh [options]
 ```
 -h, --help              Show help message and exit
 -n, --runs NUM          Number of benchmark iterations (default: 3, max: 20)
+--dns                   Run DNS resolution test in background alongside speed tests
 --json FILE             Export results to a JSON file
 --csv FILE              Export results to a CSV file
 --quiet                 Suppress banner and progress output, show only summary
@@ -100,6 +101,11 @@ python3 speedtest.sh [options]
 **Run full speed test (3 runs by default):**
 ```bash
 python3 speedtest.sh
+```
+
+**Run with background DNS testing:**
+```bash
+python3 speedtest.sh --dns
 ```
 
 **Run custom number of tests:**

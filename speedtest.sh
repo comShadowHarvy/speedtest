@@ -22,7 +22,7 @@ from urllib.request import urlopen
 from urllib.error import URLError, HTTPError
 
 # --- Version & Constants ---
-VERSION = "1.2.0"
+VERSION = "1.5.7"
 MAX_RETRIES = 2
 BASE_RETRY_DELAY = 1  # Initial retry delay in seconds
 MAX_RETRY_DELAY = 8   # Maximum retry delay in seconds (exponential backoff cap)
@@ -93,8 +93,17 @@ def exponential_backoff_delay(attempt: int, base_delay: float = BASE_RETRY_DELAY
     time.sleep(delay)
 
 
+def build_dns_query(hostname: str) -> bytes:
+    """Build a standard DNS A record query packet."""
+    header = b"\xaa\xbb\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+    qname = b"".join(bytes([len(part)]) + part.encode("ascii") for part in hostname.split(".")) + b"\x00"
+    qtype = b"\x00\x01"   # Type A
+    qclass = b"\x00\x01"  # Class IN
+    return header + qname + qtype + qclass
+
+
 def get_dns_latency(resolver: Dict[str, Any], hostname: str, timeout: int = DNS_TIMEOUT, debug: bool = False) -> Optional[float]:
-    """Query a DNS resolver and measure lookup time.
+    """Query a DNS resolver via UDP socket and measure lookup time.
     
     Args:
         resolver: Dictionary with 'name', 'ip', 'port' keys.
@@ -106,24 +115,21 @@ def get_dns_latency(resolver: Dict[str, Any], hostname: str, timeout: int = DNS_
         Lookup time in milliseconds or None on failure.
     """
     try:
-        start = time.time()
-        # Use socket to query DNS directly
+        query_packet = build_dns_query(hostname)
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(timeout)
-        
-        # Simple DNS query packet for A record lookup
-        # This is a simplified DNS query (not a full implementation)
-        # In production, consider using dnspython library
         try:
-            # Use gethostbyname with custom resolver via environment
-            ip = socket.gethostbyname(hostname)
+            start = time.time()
+            s.sendto(query_packet, (resolver["ip"], resolver.get("port", 53)))
+            data, _ = s.recvfrom(512)
             elapsed = (time.time() - start) * 1000  # Convert to milliseconds
-            return round(elapsed, 2) if elapsed > 0 else 1.0
+            if len(data) >= 12:  # Minimum valid DNS response header length
+                return round(elapsed, 2)
         finally:
             s.close()
     except (socket.timeout, socket.gaierror, OSError) as e:
         if debug:
-            print(f"{C.YELLOW}[DEBUG] DNS lookup failed for {resolver['name']} ({hostname}): {e}{C.RESET}")
+            print(f"{C.YELLOW}[DEBUG] UDP DNS query failed for {resolver['name']} ({resolver['ip']}) on {hostname}: {e}{C.RESET}")
     except Exception as e:
         if debug:
             print(f"{C.YELLOW}[DEBUG] Unexpected DNS error for {resolver['name']}: {e}{C.RESET}")
@@ -582,11 +588,14 @@ def run_benchmark() -> int:
     fast_results: List[Dict[str, Any]] = []
     dns_results: Optional[Dict[str, Any]] = None
 
-    # --- DNS Test (Optional) ---
+    # --- DNS Test (Asynchronous Background Execution) ---
+    dns_future = None
+    dns_executor = None
     if args.dns:
-        dns_results = run_dns_test(args.runs, args.quiet, args.debug)
         if not args.quiet:
-            print()
+            print(f"{C.BLUE}[i] Starting Background DNS Resolution Test...{C.RESET}\n")
+        dns_executor = ThreadPoolExecutor(max_workers=1)
+        dns_future = dns_executor.submit(run_dns_test, args.runs, True, args.debug)
 
     # --- 1. Speedtest.net ---
     if st_ok:
@@ -613,6 +622,17 @@ def run_benchmark() -> int:
     else:
         if not args.quiet:
             print(f"\n{C.RED}{C.BOLD}--- Skipping Fast.com (Blocked by Network) ---{C.RESET}")
+
+    # Collect background DNS test results if running
+    if dns_future:
+        try:
+            dns_results = dns_future.result(timeout=15)
+        except Exception as e:
+            if args.debug:
+                print(f"{C.YELLOW}[DEBUG] Background DNS test failed: {e}{C.RESET}")
+            dns_results = None
+        if dns_executor:
+            dns_executor.shutdown(wait=False)
 
     # --- Calculations with Statistics ---
     st_dls = [r["download"] for r in st_results if r.get("download")]
