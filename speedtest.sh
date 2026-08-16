@@ -4,7 +4,8 @@ Network Speed Benchmark Tool
 Author: Shadowharvy
 Description: Cross-platform speed testing tool for Arch, Fedora, Debian, Termux, and Bazzite.
 Features: Ping, Download, Upload, Jitter, ISP/Geo Detection, Connectivity Check, Cloudflare CDN,
-          Bufferbloat Testing, Wi-Fi Adapter Info, History Tracking, and Data Export.
+          Bufferbloat Testing, Wi-Fi Adapter Info, History Tracking, HTML Report Export,
+          Network Quality & Suitability Scoring, DNS Recommendation, and Continuous Monitoring.
 """
 
 import argparse
@@ -23,7 +24,7 @@ from datetime import datetime
 from typing import Dict, Optional, Tuple, List, Any
 
 # --- Version & Constants ---
-VERSION = "1.5.7"
+VERSION = "2.0.0"
 MAX_RETRIES = 2
 BASE_RETRY_DELAY = 1  # Initial retry delay in seconds
 MAX_RETRY_DELAY = 8   # Maximum retry delay in seconds (exponential backoff cap)
@@ -208,6 +209,85 @@ def run_dns_test(runs: int = 3, quiet: bool = False, debug: bool = False) -> Opt
     }
 
 
+def get_fastest_dns_recommendation(dns_results: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Determine the fastest DNS resolver and compute latency savings percentage."""
+    if not dns_results or not dns_results.get("dns_resolvers"):
+        return None
+    resolvers = dns_results["dns_resolvers"]
+    valid = []
+    for name, data in resolvers.items():
+        avg = data.get("latency_ms", {}).get("avg", 0.0)
+        if avg > 0:
+            valid.append((name, data["resolver_ip"], avg))
+    if not valid:
+        return None
+    valid.sort(key=lambda x: x[2])
+    fastest = valid[0]
+    slowest = valid[-1]
+    savings_pct = round(((slowest[2] - fastest[2]) / slowest[2]) * 100, 1) if slowest[2] > 0 else 0.0
+    return {
+        "name": fastest[0],
+        "ip": fastest[1],
+        "latency_ms": fastest[2],
+        "savings_pct": savings_pct,
+        "slowest_name": slowest[0]
+    }
+
+
+def calculate_network_suitability(dl_mbps: float, ul_mbps: float, ping_ms: float, jitter_ms: float, bb_grade: str) -> Dict[str, Any]:
+    """Calculate overall Network Quality Score (0-100) and real-world application ratings."""
+    # 1. Gaming Rating
+    gaming_score = 100.0
+    if ping_ms > 100: gaming_score -= 40
+    elif ping_ms > 50: gaming_score -= 20
+    elif ping_ms > 30: gaming_score -= 10
+
+    if jitter_ms > 20: gaming_score -= 25
+    elif jitter_ms > 10: gaming_score -= 15
+
+    if bb_grade in ("D", "F"): gaming_score -= 30
+    elif bb_grade in ("C",): gaming_score -= 15
+
+    gaming_score = max(0.0, min(100.0, gaming_score))
+    if gaming_score >= 85: gaming_status = "Excellent (Competitive)"
+    elif gaming_score >= 70: gaming_status = "Good (Casual)"
+    elif gaming_score >= 50: gaming_status = "Fair (Occasional Lags)"
+    else: gaming_status = "Poor (High Lag)"
+
+    # 2. 4K Streaming Rating
+    streaming_score = 100.0
+    if dl_mbps < 5: streaming_score = 10
+    elif dl_mbps < 25: streaming_score = 60
+    elif dl_mbps < 50: streaming_score = 85
+
+    if streaming_score >= 85: streaming_status = "Excellent (Multi-Device 4K/8K)"
+    elif streaming_score >= 60: streaming_status = "Good (Single 4K Stream)"
+    else: streaming_status = "Poor (1080p Max)"
+
+    # 3. Video Call Rating
+    video_call_score = 100.0
+    if ul_mbps < 3: video_call_score -= 40
+    elif ul_mbps < 10: video_call_score -= 15
+
+    if ping_ms > 80: video_call_score -= 30
+    if jitter_ms > 15: video_call_score -= 20
+
+    video_call_score = max(0.0, min(100.0, video_call_score))
+    if video_call_score >= 85: video_call_status = "Flawless (HD/4K Group Calls)"
+    elif video_call_score >= 65: video_call_status = "Good (HD Calls)"
+    else: video_call_status = "Poor (Audio/Video Dropouts)"
+
+    # Overall Score
+    overall_score = round((gaming_score * 0.35) + (streaming_score * 0.35) + (video_call_score * 0.30), 1)
+
+    return {
+        "overall_score": overall_score,
+        "gaming": {"score": round(gaming_score, 1), "status": gaming_status},
+        "streaming": {"score": round(streaming_score, 1), "status": streaming_status},
+        "video_call": {"score": round(video_call_score, 1), "status": video_call_status}
+    }
+
+
 def print_banner(quiet: bool) -> None:
     """Display the application banner with version information."""
     if quiet:
@@ -227,12 +307,10 @@ def check_endpoints(quiet: bool, debug: bool = False) -> Tuple[bool, bool, bool]
     fast_ok = False
     cf_ok = False
 
-    # Deep Check Speedtest.net
     res_st = make_http_request("https://www.speedtest.net/speedtest-config.php", timeout=CHECK_TIMEOUT, debug=debug)
     if res_st and "client" in res_st:
         st_ok = True
 
-    # Deep Check Fast.com
     html = make_http_request("https://fast.com", timeout=CHECK_TIMEOUT, debug=debug)
     if html:
         js_path = JS_PATH_PATTERN.search(html)
@@ -247,7 +325,6 @@ def check_endpoints(quiet: bool, debug: bool = False) -> Tuple[bool, bool, bool]
                     if api_res and "targets" in api_res:
                         fast_ok = True
 
-    # Check Cloudflare CDN
     res_cf = make_http_request("https://speed.cloudflare.com/__down?bytes=1", timeout=CHECK_TIMEOUT, debug=debug)
     if res_cf is not None:
         cf_ok = True
@@ -429,7 +506,6 @@ def get_cloudflare(debug: bool = False, retries: int = MAX_RETRIES) -> Optional[
     """Runs Cloudflare CDN speed test (multi-stream download & upload)."""
     for attempt in range(retries + 1):
         try:
-            # Multi-stream Download (4 parallel 25MB streams)
             down_url = "https://speed.cloudflare.com/__down?bytes=25000000"
             def dl_worker(url):
                 t0 = time.time()
@@ -451,7 +527,6 @@ def get_cloudflare(debug: bool = False, retries: int = MAX_RETRIES) -> Optional[
             total_dl_bytes = sum(r[0] for r in dl_results)
             dl_mbps = round((total_dl_bytes * 8) / (t_dl * 1000000), 2) if t_dl > 0 else 0.0
 
-            # Multi-stream Upload (2 parallel 1MB payload streams)
             up_url = "https://speed.cloudflare.com/__up"
             tmp = tempfile.NamedTemporaryFile(delete=False)
             tmp.write(os.urandom(1 * 1024 * 1024))
@@ -502,25 +577,18 @@ def ping_monitor(stop_event: threading.Event, ping_samples: List[float]):
 def calculate_bufferbloat_grade(unloaded_ping: float, loaded_ping: float) -> Tuple[str, float]:
     """Calculate bufferbloat increase delta and assign letter grade (A+ to F)."""
     delta = round(max(0.0, loaded_ping - unloaded_ping), 2)
-    if delta <= 5.0:
-        grade = "A+"
-    elif delta <= 15.0:
-        grade = "A"
-    elif delta <= 30.0:
-        grade = "B"
-    elif delta <= 60.0:
-        grade = "C"
-    elif delta <= 100.0:
-        grade = "D"
-    else:
-        grade = "F"
+    if delta <= 5.0: grade = "A+"
+    elif delta <= 15.0: grade = "A"
+    elif delta <= 30.0: grade = "B"
+    elif delta <= 60.0: grade = "C"
+    elif delta <= 100.0: grade = "D"
+    else: grade = "F"
     return grade, delta
 
 
 def calculate_jitter(latency_list: List[float]) -> float:
     """Calculates network jitter."""
-    if len(latency_list) < 2:
-        return 0.0
+    if len(latency_list) < 2: return 0.0
     diffs = [abs(latency_list[i] - latency_list[i - 1]) for i in range(1, len(latency_list))]
     return round(sum(diffs) / len(diffs), 2)
 
@@ -529,17 +597,10 @@ def calculate_statistics(values: List[float]) -> Dict[str, float]:
     """Calculate min, max, avg, and median statistics for a list of values."""
     if not values:
         return {"min": 0.0, "max": 0.0, "avg": 0.0, "median": 0.0}
-    
     sorted_vals = sorted(values)
     avg = round(sum(values) / len(values), 2)
     median = sorted_vals[len(sorted_vals) // 2] if len(sorted_vals) % 2 else (sorted_vals[len(sorted_vals) // 2 - 1] + sorted_vals[len(sorted_vals) // 2]) / 2
-    
-    return {
-        "min": round(min(values), 2),
-        "max": round(max(values), 2),
-        "avg": avg,
-        "median": round(median, 2)
-    }
+    return {"min": round(min(values), 2), "max": round(max(values), 2), "avg": avg, "median": round(median, 2)}
 
 
 def validate_file_path(filepath: str, mode: str = 'w', debug: bool = False) -> bool:
@@ -552,8 +613,7 @@ def validate_file_path(filepath: str, mode: str = 'w', debug: bool = False) -> b
             with open(filepath, 'a'): pass
         return True
     except Exception as e:
-        if debug:
-            print(f"{C.YELLOW}[DEBUG] File path validation failed: {e}{C.RESET}")
+        if debug: print(f"{C.YELLOW}[DEBUG] File path validation failed: {e}{C.RESET}")
         return False
 
 
@@ -563,22 +623,217 @@ def save_history_record(record_data: Dict[str, Any], debug: bool = False) -> Non
         history = []
         if os.path.exists(HISTORY_FILE):
             try:
-                with open(HISTORY_FILE, "r") as f:
-                    history = json.load(f)
-            except Exception:
-                history = []
+                with open(HISTORY_FILE, "r") as f: history = json.load(f)
+            except Exception: history = []
         history.append(record_data)
-        with open(HISTORY_FILE, "w") as f:
-            json.dump(history, f, indent=2)
+        with open(HISTORY_FILE, "w") as f: json.dump(history, f, indent=2)
     except Exception as e:
-        if debug:
-            print(f"{C.YELLOW}[DEBUG] Failed to save history: {e}{C.RESET}")
+        if debug: print(f"{C.YELLOW}[DEBUG] Failed to save history: {e}{C.RESET}")
+
+
+def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool = False) -> bool:
+    """Generates an interactive, standalone HTML report dashboard."""
+    try:
+        ts = export_data.get("timestamp", "").replace("T", " ")[:19]
+        ver = export_data.get("version", VERSION)
+        net = export_data.get("network", {})
+        geo = net.get("geo", {})
+        adapter = net.get("adapter", {})
+        stats = export_data.get("statistics", {})
+        suitability = export_data.get("suitability", {})
+        dns_rec = export_data.get("dns_recommendation", {})
+
+        st_dl = stats.get("speedtest_download_mbps", {}).get("avg", 0.0)
+        fast_dl = stats.get("fast_download_mbps", {}).get("avg", 0.0)
+        cf_dl = stats.get("cloudflare_download_mbps", {}).get("avg", 0.0)
+
+        st_ul = stats.get("speedtest_upload_mbps", {}).get("avg", 0.0)
+        cf_ul = stats.get("cloudflare_upload_mbps", {}).get("avg", 0.0)
+
+        ping = stats.get("ping_ms", {}).get("avg", 0.0)
+        jitter = stats.get("jitter_ms", 0.0)
+        bb = stats.get("bufferbloat", {})
+
+        max_dl = max(1.0, st_dl, fast_dl, cf_dl)
+
+        html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speedtest Benchmark Report - {ts}</title>
+    <style>
+        :root {{
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-main: #f8fafc;
+            --text-dim: #94a3b8;
+            --accent-cyan: #06b6d4;
+            --accent-green: #10b981;
+            --accent-yellow: #f59e0b;
+            --accent-purple: #8b5cf6;
+            --border: #334155;
+        }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 24px;
+        }}
+        .container {{
+            max-width: 1000px;
+            margin: 0 auto;
+        }}
+        .header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 16px;
+            margin-bottom: 24px;
+        }}
+        .title {{
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--accent-cyan);
+        }}
+        .meta {{
+            font-size: 14px;
+            color: var(--text-dim);
+        }}
+        .grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 24px;
+        }}
+        .card {{
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+        }}
+        .card-title {{
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-dim);
+            margin-bottom: 12px;
+        }}
+        .metric-main {{
+            font-size: 36px;
+            font-weight: bold;
+            color: var(--accent-green);
+        }}
+        .bar-container {{
+            margin-top: 12px;
+        }}
+        .bar-label {{
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            margin-bottom: 4px;
+        }}
+        .bar-bg {{
+            background: #334155;
+            height: 12px;
+            border-radius: 6px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }}
+        .bar-fill {{
+            height: 100%;
+            border-radius: 6px;
+            transition: width 0.5s ease;
+        }}
+        .badge {{
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            background: rgba(6, 182, 212, 0.2);
+            color: var(--accent-cyan);
+        }}
+        .recommendation {{
+            background: rgba(139, 92, 246, 0.15);
+            border: 1px solid var(--accent-purple);
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 16px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <div class="title">Network Speed Benchmark Report</div>
+                <div class="meta">Generated: {ts} | Tool Version: v{ver}</div>
+            </div>
+            <div class="badge">Quality Score: {suitability.get("overall_score", "N/A")}/100</div>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <div class="card-title">Network Info</div>
+                <p><strong>ISP:</strong> {geo.get("isp", "Unknown")} ({geo.get("ip", "N/A")})</p>
+                <p><strong>Location:</strong> {geo.get("city", "Unknown")}, {geo.get("country", "Unknown")}</p>
+                <p><strong>Interface:</strong> {adapter.get("interface", "Unknown")} ({adapter.get("gateway", "N/A")})</p>
+                <p><strong>Wi-Fi SSID:</strong> {adapter.get("wifi_ssid", "N/A")} ({adapter.get("wifi_signal", "N/A")})</p>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Latency & Quality</div>
+                <p><strong>Average Ping:</strong> <span style="color:var(--accent-yellow)">{ping} ms</span></p>
+                <p><strong>Jitter:</strong> {jitter} ms</p>
+                <p><strong>Bufferbloat Rating:</strong> <span class="badge">{bb.get("grade", "N/A")} (+{bb.get("delta_ms", 0)} ms)</span></p>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Real-World Readiness</div>
+                <p>🎮 <strong>Gaming:</strong> {suitability.get("gaming", {}).get("status", "N/A")}</p>
+                <p>🎥 <strong>4K Streaming:</strong> {suitability.get("streaming", {}).get("status", "N/A")}</p>
+                <p>📹 <strong>Video Calls:</strong> {suitability.get("video_call", {}).get("status", "N/A")}</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Download Speed Comparison (Mbps)</div>
+            <div class="bar-container">
+                <div class="bar-label"><span>Ookla (Speedtest.net)</span><span>{st_dl} Mbps</span></div>
+                <div class="bar-bg"><div class="bar-fill" style="width:{(st_dl/max_dl)*100}%; background:var(--accent-green)"></div></div>
+
+                <div class="bar-label"><span>Fast.com (Netflix CDN)</span><span>{fast_dl} Mbps</span></div>
+                <div class="bar-bg"><div class="bar-fill" style="width:{(fast_dl/max_dl)*100}%; background:var(--accent-cyan)"></div></div>
+
+                <div class="bar-label"><span>Cloudflare CDN</span><span>{cf_dl} Mbps</span></div>
+                <div class="bar-bg"><div class="bar-fill" style="width:{(cf_dl/max_dl)*100}%; background:var(--accent-purple)"></div></div>
+            </div>
+        </div>
+
+        {f'''
+        <div class="recommendation">
+            💡 <strong>DNS Recommendation:</strong> Switch to <strong>{dns_rec.get("name")} ({dns_rec.get("ip")})</strong> for 
+            <strong>{dns_rec.get("savings_pct")}% faster DNS resolution</strong> compared to {dns_rec.get("slowest_name")}.
+        </div>
+        ''' if dns_rec else ''}
+    </div>
+</body>
+</html>
+"""
+        with open(filepath, "w") as f:
+            f.write(html_content)
+        return True
+    except Exception as e:
+        if debug: print(f"{C.YELLOW}[DEBUG] Failed to export HTML report: {e}{C.RESET}")
+        return False
 
 
 def display_history(clear: bool = False, no_color: bool = False) -> int:
-    """Displays formatted historical benchmark trends or clears the history log."""
-    if no_color:
-        C.disable()
+    """Displays formatted historical benchmark trends or clears history log."""
+    if no_color: C.disable()
     if clear:
         if os.path.exists(HISTORY_FILE):
             os.remove(HISTORY_FILE)
@@ -592,8 +847,7 @@ def display_history(clear: bool = False, no_color: bool = False) -> int:
         return 0
 
     try:
-        with open(HISTORY_FILE, "r") as f:
-            history = json.load(f)
+        with open(HISTORY_FILE, "r") as f: history = json.load(f)
     except Exception as e:
         print(f"{C.RED}[!] Failed to read history file: {e}{C.RESET}")
         return 1
@@ -665,24 +919,18 @@ def run_single_benchmark(engine: str, run_num: int, st_ok: bool, fast_ok: bool, 
         if engine == "speedtest" and st_ok:
             res = get_speedtest(debug, MAX_RETRIES)
             if res and res.get("download"):
-                done = f"Run {run_num}... {C.GREEN}DL: {res['download']} Mbps{C.RESET} | {C.YELLOW}UL: {res['upload']} Mbps{C.RESET} {C.DIM}(Ping: {res['ping']}ms){C.RESET}"
-                sp.stop(done)
-            else:
-                sp.stop(f"Run {run_num}... {C.RED}Failed (Skipped){C.RESET}")
+                sp.stop(f"Run {run_num}... {C.GREEN}DL: {res['download']} Mbps{C.RESET} | {C.YELLOW}UL: {res['upload']} Mbps{C.RESET} {C.DIM}(Ping: {res['ping']}ms){C.RESET}")
+            else: sp.stop(f"Run {run_num}... {C.RED}Failed (Skipped){C.RESET}")
         elif engine == "fast" and fast_ok:
             res = get_fastcom(debug, MAX_RETRIES)
             if res and res.get("download"):
-                done = f"Run {run_num}... {C.GREEN}DL: {res['download']} Mbps{C.RESET}"
-                sp.stop(done)
-            else:
-                sp.stop(f"Run {run_num}... {C.RED}Failed (Skipped){C.RESET}")
+                sp.stop(f"Run {run_num}... {C.GREEN}DL: {res['download']} Mbps{C.RESET}")
+            else: sp.stop(f"Run {run_num}... {C.RED}Failed (Skipped){C.RESET}")
         elif engine == "cloudflare" and cf_ok:
             res = get_cloudflare(debug, MAX_RETRIES)
             if res and res.get("download"):
-                done = f"Run {run_num}... {C.GREEN}DL: {res['download']} Mbps{C.RESET} | {C.YELLOW}UL: {res['upload']} Mbps{C.RESET}"
-                sp.stop(done)
-            else:
-                sp.stop(f"Run {run_num}... {C.RED}Failed (Skipped){C.RESET}")
+                sp.stop(f"Run {run_num}... {C.GREEN}DL: {res['download']} Mbps{C.RESET} | {C.YELLOW}UL: {res['upload']} Mbps{C.RESET}")
+            else: sp.stop(f"Run {run_num}... {C.RED}Failed (Skipped){C.RESET}")
     finally:
         if ping_thread:
             stop_ping.set()
@@ -691,48 +939,10 @@ def run_single_benchmark(engine: str, run_num: int, st_ok: bool, fast_ok: bool, 
     return res
 
 
-def run_benchmark() -> int:
-    """Main benchmark orchestration function. Runs all tests and exports results."""
-    parser = argparse.ArgumentParser(
-        description="Network Speed Benchmark Tool by Shadowharvy",
-        epilog="Example: python3 speedtest.sh --runs 3 --dns --json results.json"
-    )
-    parser.add_argument("-n", "--runs", type=int, default=3, help="Number of benchmark iterations (default: 3)")
-    parser.add_argument("--dns", action="store_true", help="Run background DNS resolution test")
-    parser.add_argument("--history", action="store_true", help="Display benchmark performance history")
-    parser.add_argument("--history-clear", action="store_true", help="Clear historical benchmark log file")
-    parser.add_argument("--quiet", action="store_true", help="Suppress progress output, show only summary")
-    parser.add_argument("--no-color", action="store_true", help="Disable ANSI color output")
-    parser.add_argument("--json", type=str, metavar="FILE", help="Export results to a JSON file")
-    parser.add_argument("--csv", type=str, metavar="FILE", help="Export results to a CSV file")
-    parser.add_argument("--debug", action="store_true", help="Enable debug output for troubleshooting")
-    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}", help="Show version and exit")
-    args = parser.parse_args()
-
-    if args.no_color:
-        C.disable()
-
-    if args.history or args.history_clear:
-        return display_history(clear=args.history_clear, no_color=args.no_color)
-
-    if args.runs < 1 or args.runs > 20:
-        print(f"{C.RED}[!] Error: --runs must be between 1 and 20{C.RESET}")
-        return 1
-    
-    if args.json and not validate_file_path(args.json, debug=args.debug):
-        print(f"{C.RED}[!] Error: Cannot write to JSON file: {args.json}{C.RESET}")
-        return 1
-    
-    if args.csv and not validate_file_path(args.csv, debug=args.debug):
-        print(f"{C.RED}[!] Error: Cannot write to CSV file: {args.csv}{C.RESET}")
-        return 1
-
-    print_banner(args.quiet)
-
-    # --- Pre-Flight Connectivity Checks ---
+def run_benchmark_cycle(args) -> int:
+    """Run one complete benchmark cycle."""
     st_ok, fast_ok, cf_ok = check_endpoints(args.quiet, args.debug)
 
-    # --- Fetching Network Interfaces & Adapter Info ---
     if not args.quiet: print(f"{C.BLUE}[i] Detecting Network Interfaces & Adapter Info...{C.RESET}")
     lan_ip = get_lan_ip(args.debug)
     geo = get_geo_info(args.debug)
@@ -750,61 +960,43 @@ def run_benchmark() -> int:
     dns_results: Optional[Dict[str, Any]] = None
     loaded_ping_samples: List[float] = []
 
-    # --- DNS Test (Asynchronous Background Execution) ---
+    # DNS Test
     dns_future = None
     dns_executor = None
     if args.dns:
-        if not args.quiet:
-            print(f"{C.BLUE}[i] Starting Background DNS Resolution Test...{C.RESET}\n")
+        if not args.quiet: print(f"{C.BLUE}[i] Starting Background DNS Resolution Test...{C.RESET}\n")
         dns_executor = ThreadPoolExecutor(max_workers=1)
         dns_future = dns_executor.submit(run_dns_test, args.runs, True, args.debug)
 
-    # --- 1. Speedtest.net ---
+    # Ookla
     if st_ok:
-        if not args.quiet:
-            print(f"{C.CYAN}{C.BOLD}--- Running Speedtest.net (Ookla) Benchmark ---{C.RESET}")
+        if not args.quiet: print(f"{C.CYAN}{C.BOLD}--- Running Speedtest.net (Ookla) Benchmark ---{C.RESET}")
         for i in range(1, args.runs + 1):
             res = run_single_benchmark("speedtest", i, st_ok, fast_ok, cf_ok, args.quiet, args.debug, loaded_ping_samples)
             if res: st_results.append(res)
             time.sleep(0.5)
-    else:
-        if not args.quiet:
-            print(f"{C.RED}{C.BOLD}--- Skipping Speedtest.net (Blocked by Network) ---{C.RESET}")
 
-    # --- 2. Fast.com ---
+    # Fast.com
     if fast_ok:
-        if not args.quiet:
-            print(f"\n{C.CYAN}{C.BOLD}--- Running Fast.com (Netflix CDN) Benchmark ---{C.RESET}")
+        if not args.quiet: print(f"\n{C.CYAN}{C.BOLD}--- Running Fast.com (Netflix CDN) Benchmark ---{C.RESET}")
         for i in range(1, args.runs + 1):
             res = run_single_benchmark("fast", i, st_ok, fast_ok, cf_ok, args.quiet, args.debug, loaded_ping_samples)
             if res: fast_results.append(res)
             time.sleep(0.5)
-    else:
-        if not args.quiet:
-            print(f"\n{C.RED}{C.BOLD}--- Skipping Fast.com (Blocked by Network) ---{C.RESET}")
 
-    # --- 3. Cloudflare CDN ---
+    # Cloudflare
     if cf_ok:
-        if not args.quiet:
-            print(f"\n{C.CYAN}{C.BOLD}--- Running Cloudflare CDN Benchmark ---{C.RESET}")
+        if not args.quiet: print(f"\n{C.CYAN}{C.BOLD}--- Running Cloudflare CDN Benchmark ---{C.RESET}")
         for i in range(1, args.runs + 1):
             res = run_single_benchmark("cloudflare", i, st_ok, fast_ok, cf_ok, args.quiet, args.debug, loaded_ping_samples)
             if res: cf_results.append(res)
             time.sleep(0.5)
-    else:
-        if not args.quiet:
-            print(f"\n{C.RED}{C.BOLD}--- Skipping Cloudflare CDN (Blocked by Network) ---{C.RESET}")
 
-    # Collect background DNS test results
     if dns_future:
-        try:
-            dns_results = dns_future.result(timeout=15)
-        except Exception as e:
-            if args.debug: print(f"{C.YELLOW}[DEBUG] Background DNS test failed: {e}{C.RESET}")
-            dns_results = None
+        try: dns_results = dns_future.result(timeout=15)
+        except Exception: dns_results = None
         if dns_executor: dns_executor.shutdown(wait=False)
 
-    # --- Calculations with Statistics ---
     st_dls = [r["download"] for r in st_results if r.get("download")]
     st_uls = [r["upload"] for r in st_results if r.get("upload")]
     st_pings = [r["ping"] for r in st_results if r.get("ping")]
@@ -820,7 +1012,6 @@ def run_benchmark() -> int:
     ping_stats = calculate_statistics(st_pings)
     jitter = calculate_jitter(st_pings) if st_pings else 0.0
 
-    # Bufferbloat Calculation
     unloaded_ping_avg = ping_stats["avg"] if ping_stats["avg"] > 0 else 30.0
     loaded_ping_stats = calculate_statistics(loaded_ping_samples)
     bb_grade, bb_delta = calculate_bufferbloat_grade(unloaded_ping_avg, loaded_ping_stats["avg"])
@@ -832,7 +1023,14 @@ def run_benchmark() -> int:
         "delta_ms": bb_delta
     }
 
-    # --- Print Summary ---
+    # Highest measured download/upload across engines
+    max_dl = max(st_dl_stats["avg"], fast_dl_stats["avg"], cf_dl_stats["avg"])
+    max_ul = max(st_ul_stats["avg"], cf_ul_stats["avg"])
+
+    suitability = calculate_network_suitability(max_dl, max_ul, ping_stats["avg"], jitter, bb_grade)
+    dns_rec = get_fastest_dns_recommendation(dns_results)
+
+    # Summary
     print(f"\n{C.MAGENTA}{C.BOLD}===================================================={C.RESET}")
     print(f"{C.MAGENTA}{C.BOLD}                  BENCHMARK SUMMARY                 {C.RESET}")
     print(f"{C.MAGENTA}{C.BOLD}===================================================={C.RESET}")
@@ -843,36 +1041,27 @@ def run_benchmark() -> int:
     print(f" {C.BOLD}Location:{C.RESET}       {geo['city']}, {geo['country']}")
     print(f" {C.DIM}----------------------------------------------------{C.RESET}")
     
-    if st_ok:
-        print(f" {C.BOLD}Ookla Download:{C.RESET} {C.GREEN}{st_dl_stats['avg']} Mbps{C.RESET} {C.DIM}(min: {st_dl_stats['min']}, max: {st_dl_stats['max']}){C.RESET}")
-        print(f" {C.BOLD}Ookla Upload:{C.RESET}   {C.GREEN}{st_ul_stats['avg']} Mbps{C.RESET} {C.DIM}(min: {st_ul_stats['min']}, max: {st_ul_stats['max']}){C.RESET}")
-    else:
-        print(f" {C.BOLD}Ookla Benchmark:{C.RESET} {C.RED}Blocked by Network{C.RESET}")
+    if st_ok: print(f" {C.BOLD}Ookla Download:{C.RESET} {C.GREEN}{st_dl_stats['avg']} Mbps{C.RESET} {C.DIM}(min: {st_dl_stats['min']}, max: {st_dl_stats['max']}){C.RESET}")
+    if fast_ok: print(f" {C.BOLD}Fast Download:{C.RESET}  {C.GREEN}{fast_dl_stats['avg']} Mbps{C.RESET} {C.DIM}(min: {fast_dl_stats['min']}, max: {fast_dl_stats['max']}){C.RESET}")
+    if cf_ok: print(f" {C.BOLD}Cloudflare DL:{C.RESET}  {C.GREEN}{cf_dl_stats['avg']} Mbps{C.RESET} {C.DIM}(min: {cf_dl_stats['min']}, max: {cf_dl_stats['max']}){C.RESET}")
 
-    if fast_ok:
-        print(f" {C.BOLD}Fast Download:{C.RESET}  {C.GREEN}{fast_dl_stats['avg']} Mbps{C.RESET} {C.DIM}(min: {fast_dl_stats['min']}, max: {fast_dl_stats['max']}){C.RESET}")
-    else:
-        print(f" {C.BOLD}Fast Benchmark:{C.RESET}  {C.RED}Blocked by Network{C.RESET}")
-
-    if cf_ok:
-        print(f" {C.BOLD}Cloudflare DL:{C.RESET}  {C.GREEN}{cf_dl_stats['avg']} Mbps{C.RESET} {C.DIM}(min: {cf_dl_stats['min']}, max: {cf_dl_stats['max']}){C.RESET}")
-        print(f" {C.BOLD}Cloudflare UL:{C.RESET}  {C.GREEN}{cf_ul_stats['avg']} Mbps{C.RESET} {C.DIM}(min: {cf_ul_stats['min']}, max: {cf_ul_stats['max']}){C.RESET}")
-    else:
-        print(f" {C.BOLD}Cloudflare CDN:{C.RESET} {C.RED}Blocked by Network{C.RESET}")
-
-    print(f" {C.BOLD}Average Ping:{C.RESET}   {C.YELLOW}{ping_stats['avg']} ms{C.RESET} {C.DIM}(min: {ping_stats['min']}, max: {ping_stats['max']}){C.RESET}")
-    print(f" {C.BOLD}Jitter:{C.RESET}         {C.YELLOW}{jitter} ms{C.RESET}")
-    print(f" {C.BOLD}Bufferbloat:{C.RESET}    {C.CYAN}{bb_grade}{C.RESET} {C.DIM}(+{bb_delta} ms loaded ping spike){C.RESET}")
+    print(f" {C.BOLD}Average Ping:{C.RESET}   {C.YELLOW}{ping_stats['avg']} ms{C.RESET} | {C.BOLD}Jitter:{C.RESET} {C.YELLOW}{jitter} ms{C.RESET}")
+    print(f" {C.BOLD}Bufferbloat:{C.RESET}    {C.CYAN}{bb_grade}{C.RESET} {C.DIM}(+{bb_delta} ms loaded spike){C.RESET}")
+    print(f" {C.BOLD}Quality Score:{C.RESET}  {C.GREEN}{C.BOLD}{suitability['overall_score']}/100{C.RESET}")
+    print(f"   ├─ 🎮 Gaming:     {C.CYAN}{suitability['gaming']['status']}{C.RESET}")
+    print(f"   ├─ 🎥 Streaming:  {C.CYAN}{suitability['streaming']['status']}{C.RESET}")
+    print(f"   └─ 📹 Video Call: {C.CYAN}{suitability['video_call']['status']}{C.RESET}")
     
     if dns_results:
-        print(f" {C.BOLD}DNS Latency:{C.RESET}   {C.YELLOW}{dns_results['overall_latency_ms']['avg']} ms{C.RESET} {C.DIM}(min: {dns_results['overall_latency_ms']['min']}, max: {dns_results['overall_latency_ms']['max']}){C.RESET}")
+        print(f" {C.BOLD}DNS Latency:{C.RESET}   {C.YELLOW}{dns_results['overall_latency_ms']['avg']} ms{C.RESET}")
         for resolver_name, resolver_data in dns_results['dns_resolvers'].items():
             latency = resolver_data['latency_ms']['avg']
             print(f"   └─ {resolver_name}: {C.YELLOW}{latency} ms{C.RESET}")
+        if dns_rec:
+            print(f" {C.MAGENTA}💡 DNS Tip: Switch to {dns_rec['name']} ({dns_rec['ip']}) for {dns_rec['savings_pct']}% faster resolution!{C.RESET}")
     
     print(f"{C.MAGENTA}{C.BOLD}===================================================={C.RESET}\n")
 
-    # Save to history file
     record_data: Dict[str, Any] = {
         "timestamp": datetime.now().isoformat(),
         "version": VERSION,
@@ -887,11 +1076,12 @@ def run_benchmark() -> int:
             "jitter_ms": jitter,
             "bufferbloat": bufferbloat_info
         },
+        "suitability": suitability,
+        "dns_recommendation": dns_rec,
         "dns": dns_results
     }
     save_history_record(record_data, args.debug)
 
-    # --- Data Export Logic ---
     export_data: Dict[str, Any] = {
         **record_data,
         "raw_results": {"speedtest": st_results, "fast": fast_results, "cloudflare": cf_results}
@@ -911,21 +1101,68 @@ def run_benchmark() -> int:
             with open(args.csv, "w", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow(["Engine", "Run", "Download (Mbps)", "Upload (Mbps)", "Ping (ms)"])
-                for idx, r in enumerate(st_results):
-                    writer.writerow(["Speedtest", idx + 1, r.get("download", ""), r.get("upload", ""), r.get("ping", "")])
-                for idx, r in enumerate(fast_results):
-                    writer.writerow(["Fast.com", idx + 1, r.get("download", ""), "", ""])
-                for idx, r in enumerate(cf_results):
-                    writer.writerow(["Cloudflare", idx + 1, r.get("download", ""), r.get("upload", ""), ""])
+                for idx, r in enumerate(st_results): writer.writerow(["Speedtest", idx + 1, r.get("download", ""), r.get("upload", ""), r.get("ping", "")])
+                for idx, r in enumerate(fast_results): writer.writerow(["Fast.com", idx + 1, r.get("download", ""), "", ""])
+                for idx, r in enumerate(cf_results): writer.writerow(["Cloudflare", idx + 1, r.get("download", ""), r.get("upload", ""), ""])
             if not args.quiet: print(f"{C.GREEN}[✔] CSV data exported to {args.csv}{C.RESET}")
         except Exception as e:
             print(f"{C.RED}[!] Failed to write CSV: {e}{C.RESET}")
+            exit_code = 1
+
+    if args.html:
+        if export_html_report(args.html, export_data, args.debug):
+            if not args.quiet: print(f"{C.GREEN}[✔] Interactive HTML Report exported to {args.html}{C.RESET}")
+        else:
+            print(f"{C.RED}[!] Failed to write HTML report: {args.html}{C.RESET}")
             exit_code = 1
     
     if not st_ok and not fast_ok and not cf_ok:
         return 2
     
     return exit_code
+
+
+def run_benchmark() -> int:
+    """Main entry point supporting single run or continuous monitoring mode."""
+    parser = argparse.ArgumentParser(
+        description="Network Speed Benchmark Tool by Shadowharvy",
+        epilog="Example: python3 speedtest.sh --runs 3 --dns --html report.html"
+    )
+    parser.add_argument("-n", "--runs", type=int, default=3, help="Number of benchmark iterations (default: 3)")
+    parser.add_argument("--dns", action="store_true", help="Run background DNS resolution test")
+    parser.add_argument("--history", action="store_true", help="Display benchmark performance history")
+    parser.add_argument("--history-clear", action="store_true", help="Clear historical benchmark log file")
+    parser.add_argument("--html", type=str, metavar="FILE", help="Export interactive HTML report dashboard")
+    parser.add_argument("--json", type=str, metavar="FILE", help="Export results to a JSON file")
+    parser.add_argument("--csv", type=str, metavar="FILE", help="Export results to a CSV file")
+    parser.add_argument("--monitor", type=int, metavar="MINS", help="Continuous monitoring mode interval in minutes")
+    parser.add_argument("--quiet", action="store_true", help="Suppress progress output, show only summary")
+    parser.add_argument("--no-color", action="store_true", help="Disable ANSI color output")
+    parser.add_argument("--debug", action="store_true", help="Enable debug output for troubleshooting")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}", help="Show version and exit")
+    args = parser.parse_args()
+
+    if args.no_color: C.disable()
+
+    if args.history or args.history_clear:
+        return display_history(clear=args.history_clear, no_color=args.no_color)
+
+    if args.runs < 1 or args.runs > 20:
+        print(f"{C.RED}[!] Error: --runs must be between 1 and 20{C.RESET}")
+        return 1
+
+    print_banner(args.quiet)
+
+    if args.monitor:
+        print(f"{C.CYAN}{C.BOLD}[i] Continuous Monitoring Mode Active (Interval: {args.monitor} mins). Press Ctrl+C to stop.{C.RESET}\n")
+        cycle = 1
+        while True:
+            print(f"{C.MAGENTA}{C.BOLD}--- Monitoring Cycle #{cycle} [{datetime.now().strftime('%H:%M:%S')}] ---{C.RESET}")
+            run_benchmark_cycle(args)
+            cycle += 1
+            time.sleep(args.monitor * 60)
+
+    return run_benchmark_cycle(args)
 
 
 if __name__ == "__main__":
