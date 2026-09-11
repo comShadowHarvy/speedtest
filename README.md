@@ -1,44 +1,51 @@
-# Network Speed Benchmark Tool
+# Network Speed & Diagnostic Benchmark Tool
 
-A cross-platform CLI tool for testing network speed, measuring connectivity, analyzing bufferbloat, generating interactive HTML reports, and evaluating real-world gaming/streaming readiness with geolocation & Wi-Fi adapter detection.
+A high-performance, cross-platform CLI tool for network speed benchmarking, dual-stack IPv4/IPv6 diagnostics, directional bufferbloat analysis, DNS & DoH resolution tests, hardware link speed detection, interactive HTML dashboard generation, and SLA threshold monitoring.
 
-**Version: 2.1.0** | System DNS Auto-Detection, Packet Loss Probes, Engine Selection Filtering (`--engine`), Auto-Open HTML Browser (`--open`), and Speed Tier Diagnostics
+**Version: 3.0.0** | Universal Shell Execution, Multi-Gigabit Saturation, Directional Bufferbloat, Dual-Stack IPv4/IPv6, Hardware Link Speeds, Unicode Sparklines, DoH Benchmarking, and Glassmorphism Dashboard
 
-## Features
+---
 
-- **Multi-Engine Speed Testing**: Ookla (Speedtest.net), Fast.com (Netflix CDN), and Cloudflare CDN
-- **Engine Filter (`--engine`)**: Select specific engines (`cloudflare`, `fast`, `speedtest`, `all`) for quick tests
-- **Multi-Stream Downloads**: Parallel worker threads for saturating high-bandwidth connections
-- **Packet Loss Diagnostics**: Measures ICMP/UDP packet loss percentage ($0\%$ to $100\%$)
-- **System & Gateway DNS Auto-Detection**: Benchmarks system `/etc/resolv.conf` / `systemd-resolved` DNS along with Local Gateway IP, Google, Cloudflare, and Quad9
-- **Auto-Open HTML Reports (`--html` + `--open`)**: Standalone dark-mode HTML reports that auto-open in default browser
-- **Network Quality & Suitability Scoring**: 0–100 overall score with Gaming (low lag), 4K/8K Streaming, and HD/4K Video Call readiness
-- **Speed Tier Classification**: Automatically categorizes connections (Gigabit, Ultra-Fast, Broadband, Basic)
-- **Optimal DNS Recommendation**: Compares UDP DNS latencies and suggests the fastest DNS server with percentage resolution speedup tips
-- **Bufferbloat / Loaded Latency**: Measures ping spikes under active transfer load and assigns grades ($A^+$ to $F$)
-- **Continuous Monitoring Mode (`--monitor`)**: Periodically logs speed benchmarks on a custom interval to track ISP performance over 24 hours
-- **Network Adapter & Wi-Fi Diagnostics**: Detects active network interface (`wlan0`, `eth0`), Gateway IP, Wi-Fi SSID, and Signal Quality
-- **Historical Benchmark Logs**: Auto-saves benchmark records to `~/.speedtest_history.json` with `--history` viewing
-- **Data Export**: Export results in structured JSON, CSV, and HTML formats
-- **Multi-Platform Support**: Works on Arch Linux, Fedora, Debian/Ubuntu, Bazzite, and Termux
+## Key Features
+
+- **Universal Shell Execution**: Runs seamlessly via `./speedtest.sh`, `bash speedtest.sh`, `sh speedtest.sh`, or `python3 speedtest.sh`.
+- **Multi-Engine Speed Testing**:
+  - **Ookla (Speedtest.net)**: Native official Ookla binary auto-detection (`speedtest --format=json`) with fallback to `speedtest-cli`.
+  - **Fast.com (Netflix CDN)**: Multi-stream adaptive chunking (saturates 1Gbps+ connections).
+  - **Cloudflare CDN**: Multi-worker parallel download & 10MB+ upload stream tests.
+  - **Custom Server (`--server <URL>`)**: Benchmark any custom HTTP/HTTPS CDN or endpoint.
+- **Engine Filter (`--engine`)**: Select specific engines (`cloudflare`, `fast`, `speedtest`, `custom`, `all`).
+- **Bufferbloat & Loaded Latency ($A^+$ to $F$)**: Measures real-time latency spikes under active transfer load and calculates loaded ping delta ($\Delta$ ms).
+- **Dual-Stack IPv4 & IPv6 Support**: Automatic dual-stack detection with `-4` / `--ipv4` and `-6` / `--ipv6` switches.
+- **Packet Loss Diagnostics**: Measures ICMP ping loss percentage ($0\%$ to $100\%$) with UDP socket probe fallback.
+- **System, Gateway & DoH DNS Benchmarks**:
+  - Benchmarks system `/etc/resolv.conf`, `resolvectl`, `nmcli`, `scutil` (macOS), Android `getprop`, and Local Gateway IP.
+  - Tests public resolvers: Cloudflare, Google, Quad9, OpenDNS, AdGuard.
+  - Tests DNS-over-HTTPS (DoH) latencies.
+  - Calculates fastest DNS recommendation and resolution speedup percentage.
+- **Hardware & Network Adapter Diagnostics**: Detects active network interface, connection type (Ethernet, Wi-Fi, VPN), NIC Link Speed (e.g., 1.0 Gbps / 2.5 Gbps / 10 Gbps), Wi-Fi SSID, Signal dBm & %, Channel, Frequency Band (2.4/5/6 GHz), and MTU.
+- **Interactive Glassmorphism HTML Dashboard (`--html` + `--open`)**: Self-contained, responsive dashboard with dark/light mode toggle, SVG score gauge, speed comparison charts, copy summary button, and PDF printing support (100% offline-ready).
+- **Terminal Sparklines & History (`--history` & `--history-graph`)**: Visualizes historical speed trends directly in the terminal using Unicode sparklines (` ▂▃▅▆▇█`).
+- **SLA Threshold Alerts**: Set minimum download/upload thresholds or max latency limits (`--threshold-dl`, `--threshold-ul`, `--threshold-ping`) for automated monitoring and CI/CD pipelines (exits with code `3` if violated).
+- **Data Export Formats**: Structured JSON, stdout JSON (`--json-stdout`), CSV, GitHub Markdown (`--markdown`), and HTML.
+- **Continuous Monitoring Mode (`--monitor`)**: Periodically logs speed benchmarks on a custom interval to track ISP performance 24/7.
+- **Multi-Platform Support**: Works on Arch Linux, Fedora, Debian/Ubuntu, openSUSE, Alpine, Void, Solus, macOS, Bazzite, and Termux.
+
+---
 
 ## Requirements
 
-- Python 3.x
-- `curl` (for HTTP requests)
-- `speedtest-cli` (installed via setup script)
+- Python 3.7+
+- `curl` (for network transfers)
+- `speedtest-cli` or official Ookla `speedtest` binary
 
-## Supported Platforms
-
-- **Linux**: Arch, Fedora, Debian/Ubuntu, Mint, Pop!_OS
-- **Bazzite** (Fedora-based)
-- **Termux** (Android via Termux app)
+---
 
 ## Installation
 
 ### Quick Setup
 
-Run the setup script to automatically detect your system and install dependencies:
+Run the setup script to automatically detect your operating system and configure dependencies:
 
 ```bash
 chmod +x setup.sh
@@ -47,21 +54,34 @@ chmod +x setup.sh
 
 ### Manual Installation
 
-For a specific system, install dependencies manually:
-
-**Arch Linux:**
+**Arch Linux / Manjaro:**
 ```bash
 sudo pacman -S python curl speedtest-cli
 ```
 
-**Fedora/RHEL:**
+**Fedora / RHEL / Bazzite:**
 ```bash
 sudo dnf install python3 curl speedtest-cli
 ```
 
-**Debian/Ubuntu:**
+**Debian / Ubuntu / Mint / Pop!_OS:**
 ```bash
 sudo apt-get update && sudo apt-get install python3 python3-pip curl speedtest-cli
+```
+
+**macOS (Homebrew):**
+```bash
+brew install python curl speedtest-cli
+```
+
+**openSUSE:**
+```bash
+sudo zypper install python3 curl python3-pip
+```
+
+**Alpine Linux:**
+```bash
+sudo apk add python3 py3-pip curl
 ```
 
 **Termux (Android):**
@@ -70,66 +90,102 @@ pkg update && pkg install python curl
 pip install speedtest-cli
 ```
 
+---
+
 ## Usage
 
-Run the speedtest tool:
+You can run the benchmark directly:
 
 ```bash
-chmod +x speedtest.sh
+./speedtest.sh [options]
+```
+
+Or with `bash` / `python3`:
+
+```bash
+bash speedtest.sh [options]
 python3 speedtest.sh [options]
 ```
 
-### Options
+### CLI Options
 
 ```
 -h, --help              Show help message and exit
 -n, --runs NUM          Number of benchmark iterations (default: 3, max: 20)
---dns                   Run background DNS resolution test alongside speed tests
---engine ENGINE         Select engine filter: all, cloudflare, fast, speedtest (default: all)
---html FILE             Export interactive HTML dashboard report
+--dns                   Run background DNS & DoH resolution tests
+--engine ENGINE         Select engine: all, cloudflare, fast, speedtest, custom (default: all)
+--server URL            Benchmark against a custom HTTP/HTTPS download URL
+-4, --ipv4              Force IPv4 network requests
+-6, --ipv6              Force IPv6 network requests
+--html FILE             Export interactive glassmorphism HTML dashboard
 --open                  Auto-open exported HTML report in default browser
---history               Display historical benchmark performance logs & averages
---history-clear         Clear historical benchmark log file
---json FILE             Export results to a JSON file
+--markdown FILE         Export GitHub-flavored Markdown summary report
+--json FILE             Export structured benchmark data to a JSON file
+--json-stdout           Output machine-readable JSON directly to stdout
 --csv FILE              Export results to a CSV file
+--threshold-dl MBPS     Minimum required download speed (exits with code 3 if violated)
+--threshold-ul MBPS     Minimum required upload speed (exits with code 3 if violated)
+--threshold-ping MS     Maximum acceptable ping latency (exits with code 3 if violated)
+--history               Display historical benchmark logs and averages
+--history-graph         Render sparkline trend graph with history
+--history-clear         Clear historical benchmark log file
 --monitor MINS          Continuous monitoring mode interval in minutes
---quiet                 Suppress banner and progress output, show only summary
---no-color              Disable colored terminal output
---debug                 Enable debug output for troubleshooting
+--quiet                 Suppress banner and live progress output, show only summary
+--no-color              Disable ANSI terminal colors
+--debug                 Enable debug logs for troubleshooting
 --version               Show version and exit
 ```
 
-### Examples
+---
 
-**Run full speed test (3 runs by default):**
+## Examples
+
+### 1. Standard Benchmark with DNS & HTML Dashboard
 ```bash
-python3 speedtest.sh
+./speedtest.sh --runs 3 --dns --html report.html --open
 ```
 
-**Run ultra-fast Cloudflare-only speed test with DNS benchmarks:**
+### 2. Fast Cloudflare-Only Speed Test
 ```bash
-python3 speedtest.sh --engine cloudflare --dns
+./speedtest.sh --engine cloudflare --dns
 ```
 
-**Export interactive HTML report dashboard and auto-open in browser:**
+### 3. SLA Threshold Monitoring for Automation / CI
 ```bash
-python3 speedtest.sh --dns --html report.html --open
+./speedtest.sh --engine cloudflare --threshold-dl 100 --threshold-ping 30
 ```
 
-**Continuous monitoring every 30 minutes:**
+### 4. Machine-Readable JSON Output to stdout
 ```bash
-python3 speedtest.sh --monitor 30 --dns
+./speedtest.sh --engine cloudflare --quiet --json-stdout | jq .statistics
 ```
 
-**View benchmark history:**
+### 5. Benchmark History with Sparkline Trend Graph
 ```bash
-python3 speedtest.sh --history
+./speedtest.sh --history --history-graph
 ```
 
-**Clear history logs:**
+### 6. Continuous Monitoring Every 15 Minutes
 ```bash
-python3 speedtest.sh --history-clear
+./speedtest.sh --monitor 15 --dns
 ```
+
+### 7. Custom CDN Server Benchmark
+```bash
+./speedtest.sh --server "https://speed.hetzner.de/100MB.bin" --dns
+```
+
+---
+
+## Running Unit Tests
+
+Run the included test suite to verify all calculations, algorithms, and report generators:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+---
 
 ## Author
 
