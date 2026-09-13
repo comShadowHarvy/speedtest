@@ -81,7 +81,7 @@ class C:
     DIM = "\033[2m"
     ITALIC = "\033[3m"
     UNDERLINE = "\033[4m"
-    
+
     # Colors
     CYAN = "\033[96m"
     GREEN = "\033[92m"
@@ -147,7 +147,7 @@ def generate_sparkline(values: List[float]) -> str:
     val_range = max_val - min_val
     if val_range == 0:
         return SPARKLINE_CHARS[3] * len(values)
-    
+
     spark = ""
     for v in values:
         idx = int(((v - min_val) / val_range) * (len(SPARKLINE_CHARS) - 1))
@@ -169,7 +169,7 @@ def make_http_request(
         cmd.append("-4")
     elif ip_version == "6":
         cmd.append("-6")
-        
+
     if headers:
         for k, v in headers.items():
             cmd.extend(["-H", f"{k}: {v}"])
@@ -209,7 +209,7 @@ def get_dns_latency(resolver: Dict[str, Any], hostname: str, timeout: int = DNS_
         ip = resolver["ip"]
         port = resolver.get("port", 53)
         query_packet = build_dns_query(hostname)
-        
+
         sock_family = socket.AF_INET6 if ":" in ip else socket.AF_INET
         s = socket.socket(sock_family, socket.SOCK_DGRAM)
         s.settimeout(timeout)
@@ -687,7 +687,10 @@ def get_network_adapter_info(debug: bool = False) -> Dict[str, str]:
                             info["wifi_signal"] = f"{fields[2]}%"
                             info["interface_type"] = "Wi-Fi"
                         if len(fields) >= 4 and fields[3]:
-                            info["wifi_frequency"] = f"{fields[3]} MHz"
+                            freq_val = fields[3].strip()
+                            if not freq_val.endswith("MHz") and not freq_val.endswith("GHz"):
+                                freq_val = f"{freq_val} MHz"
+                            info["wifi_frequency"] = freq_val
                         if len(fields) >= 5 and fields[4]:
                             info["wifi_channel"] = f"Ch {fields[4]}"
                         break
