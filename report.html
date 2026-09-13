@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Speed Benchmark Dashboard - 2026-09-13 10:19:44</title>
+    <style>
+        :root {
+            --bg-gradient: radial-gradient(circle at 10% 20%, #0f172a 0%, #020617 95%);
+            --card-bg: rgba(30, 41, 59, 0.72);
+            --card-border: rgba(148, 163, 184, 0.16);
+            --text-main: #f8fafc;
+            --text-dim: #94a3b8;
+            --accent-cyan: #06b6d4;
+            --accent-green: #10b981;
+            --accent-yellow: #f59e0b;
+            --accent-purple: #8b5cf6;
+            --accent-red: #ef4444;
+            --gauge-track: #334155;
+        }
+        [data-theme="light"] {
+            --bg-gradient: radial-gradient(circle at 10% 20%, #f8fafc 0%, #e2e8f0 95%);
+            --card-bg: rgba(255, 255, 255, 0.88);
+            --card-border: rgba(100, 116, 139, 0.22);
+            --text-main: #0f172a;
+            --text-dim: #64748b;
+            --gauge-track: #e2e8f0;
+        }
+        * { box-sizing: border-box; transition: background 0.3s, color 0.3s, border-color 0.3s; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: var(--bg-gradient);
+            color: var(--text-main);
+            margin: 0;
+            padding: 32px 16px;
+            min-height: 100vh;
+        }
+        .container { max-width: 1120px; margin: 0 auto; }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--card-border);
+            padding-bottom: 20px;
+            margin-bottom: 28px;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+        .header-title h1 { margin: 0; font-size: 28px; color: var(--accent-cyan); font-weight: 800; }
+        .header-title p { margin: 4px 0 0 0; color: var(--text-dim); font-size: 14px; }
+        .header-controls { display: flex; gap: 10px; align-items: center; }
+        .btn {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            color: var(--text-main);
+            padding: 8px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+        }
+        .card-title {
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            color: var(--text-dim);
+            font-weight: 700;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .gauge-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 0;
+        }
+        .score-circle {
+            width: 140px;
+            height: 140px;
+            border-radius: 50%;
+            background: conic-gradient(#06b6d4 285.12deg, var(--gauge-track) 0deg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            margin-bottom: 12px;
+        }
+        .score-inner {
+            width: 110px;
+            height: 110px;
+            background: var(--card-bg);
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .score-value { font-size: 32px; font-weight: 900; color: #06b6d4; }
+        .score-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--card-border);
+            font-size: 14px;
+        }
+        .info-row:last-child { border-bottom: none; }
+        .info-label { color: var(--text-dim); }
+        .info-val { font-weight: 600; text-align: right; }
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            background: rgba(6, 182, 212, 0.15);
+            color: var(--accent-cyan);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+        }
+        .bar-container { margin-top: 14px; }
+        .bar-label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; font-weight: 600; }
+        .bar-bg { background: var(--gauge-track); height: 14px; border-radius: 7px; overflow: hidden; margin-bottom: 14px; }
+        .bar-fill { height: 100%; border-radius: 7px; transition: width 1s ease-in-out; }
+        .recommendation {
+            background: rgba(139, 92, 246, 0.12);
+            border: 1px solid var(--accent-purple);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-top: 20px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .dns-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 7px 0;
+            border-bottom: 1px solid var(--card-border);
+            font-size: 13px;
+        }
+        .dns-row:last-child { border-bottom: none; }
+        .dns-name { color: var(--text-main); font-weight: 600; }
+        .dns-name small { color: var(--text-dim); font-weight: normal; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--card-border); }
+        th { color: var(--text-dim); text-transform: uppercase; font-size: 11px; }
+        @media (max-width: 600px) {
+            .grid { grid-template-columns: 1fr; }
+            .header { flex-direction: column; align-items: flex-start; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-title">
+                <h1>Network Speed Benchmark</h1>
+                <p>Generated: 2026-09-13 10:19:44 | Tool Version: v3.1.0 | Host: EastLink</p>
+            </div>
+            <div class="header-controls">
+                <button class="btn" onclick="toggleTheme()">🌓 Toggle Theme</button>
+                <button class="btn" onclick="copySummary()">📋 Copy Summary</button>
+                <button class="btn" onclick="window.print()">🖨️ Print / PDF</button>
+            </div>
+        </div>
+
+        <div class="grid">
+            <!-- Overall Score & Speed Tier -->
+            <div class="card">
+                <div class="card-title">Network Quality Score <span class="badge">Standard Broadband</span></div>
+                <div class="gauge-wrap">
+                    <div class="score-circle">
+                        <div class="score-inner">
+                            <div class="score-value">79.2</div>
+                            <div class="score-label">out of 100</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="info-row"><span class="info-label">Gaming Readiness:</span><span class="info-val">Good (Smooth Casual Gaming)</span></div>
+                <div class="info-row"><span class="info-label">4K/8K Streaming:</span><span class="info-val">Flawless (Multi-Device 4K/8K HDR)</span></div>
+                <div class="info-row"><span class="info-label">HD/4K Video Calls:</span><span class="info-val">Degraded (Audio/Video Artifacts)</span></div>
+            </div>
+
+            <!-- Network Hardware & Geolocation -->
+            <div class="card">
+                <div class="card-title">Network & Hardware Info</div>
+                <div class="info-row"><span class="info-label">Public IP (WAN):</span><span class="info-val">24.138.182.29</span></div>
+                
+                <div class="info-row"><span class="info-label">ISP & Location:</span><span class="info-val">EastLink (Port Elgin, Canada)</span></div>
+                <div class="info-row"><span class="info-label">Interface:</span><span class="info-val">wlp3s0 (Wi-Fi)</span></div>
+                <div class="info-row"><span class="info-label">Link Speed:</span><span class="info-val" style="color:var(--accent-green)">648.5 MBit/s</span></div>
+                <div class="info-row"><span class="info-label">Wi-Fi SSID & Signal:</span><span class="info-val">RCMP_mobile (-46 dBm)</span></div>
+                <div class="info-row"><span class="info-label">Wi-Fi Band:</span><span class="info-val">5745 MHz (5 GHz)</span></div>
+                <div class="info-row"><span class="info-label">Local Gateway:</span><span class="info-val">192.168.1.1</span></div>
+                <div class="info-row"><span class="info-label">Interface MTU:</span><span class="info-val">1500</span></div>
+            </div>
+
+            <!-- Latency & Directional Bufferbloat Diagnostics -->
+            <div class="card">
+                <div class="card-title">Directional Bufferbloat & Latency</div>
+                <div class="info-row"><span class="info-label">Idle Baseline Ping:</span><span class="info-val" style="color:var(--accent-yellow)">68.54 ms</span></div>
+                <div class="info-row"><span class="info-label">Download Active Latency:</span><span class="info-val">81.0 ms <span class="badge">A</span></span></div>
+                <div class="info-row"><span class="info-label">Upload Active Latency:</span><span class="info-val">68.54 ms <span class="badge">A+</span></span></div>
+                <div class="info-row"><span class="info-label">Bufferbloat Grade:</span><span class="badge" style="color:var(--accent-cyan); font-size:13px;">A (+12.46 ms spike)</span></div>
+                <div class="info-row"><span class="info-label">Network Jitter:</span><span class="info-val">0.0 ms</span></div>
+                <div class="info-row"><span class="info-label">Packet Loss:</span><span class="info-val">0.0%</span></div>
+            </div>
+        </div>
+
+        <!-- Download & Upload Speed Comparisons -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-title">Multi-Engine Bandwidth Comparisons (Mbps)</div>
+            <div class="bar-container">
+                
+
+                
+                <div class="bar-label"><span>Fast.com / Netflix CDN (Download)</span><span>67.80 Mbps</span></div>
+                <div class="bar-bg"><div class="bar-fill" style="width:100.0%; background:var(--accent-cyan)"></div></div>
+                
+
+                
+
+                
+
+                
+
+                
+            </div>
+        </div>
+
+        
+        <!-- DNS Resolution Leaderboard & Recommendations -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-title">DNS Resolution Leaderboard & Speed Ranking</div>
+            <table>
+                <thead>
+                    <tr><th>Rank</th><th>DNS Resolver</th><th>IP Address</th><th>Avg Latency</th><th>Category / Best For</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>🥇 1</strong></td><td><strong>Local Gateway (192.168.1.1)</strong></td><td><code>192.168.1.1</code></td><td style='color:var(--accent-green)'><strong>23.05 ms</strong></td><td><span class='badge'>Local Router Cache (Fastest)</span></td></tr><tr><td><strong>🥈 2</strong></td><td><strong>System DNS (fd8b:88ea:d899:1::1)</strong></td><td><code>fd8b:88ea:d899:1::1</code></td><td style='color:var(--accent-green)'><strong>46.08 ms</strong></td><td><span class='badge'>Current System Default</span></td></tr><tr><td><strong>🥉 3</strong></td><td><strong>Cloudflare</strong></td><td><code>1.1.1.1</code></td><td style='color:var(--accent-green)'><strong>61.05 ms</strong></td><td><span class='badge'>Ultra-Fast & Privacy (No Logs)</span></td></tr><tr><td><strong>#4</strong></td><td><strong>Google</strong></td><td><code>8.8.8.8</code></td><td style='color:var(--accent-green)'><strong>70.82 ms</strong></td><td><span class='badge'>Global Anycast Reliability</span></td></tr><tr><td><strong>#5</strong></td><td><strong>AdGuard</strong></td><td><code>94.140.14.14</code></td><td style='color:var(--accent-green)'><strong>77.66 ms</strong></td><td><span class='badge'>System-Wide Ad & Tracker Blocking</span></td></tr><tr><td><strong>#6</strong></td><td><strong>Quad9</strong></td><td><code>9.9.9.9</code></td><td style='color:var(--accent-green)'><strong>77.98 ms</strong></td><td><span class='badge'>Malware & Phishing Threat Blocking</span></td></tr><tr><td><strong>#7</strong></td><td><strong>OpenDNS</strong></td><td><code>208.67.222.222</code></td><td style='color:var(--accent-green)'><strong>123.12 ms</strong></td><td><span class='badge'>Cisco Security & Web Filtering</span></td></tr>
+                </tbody>
+            </table>
+
+            <div class="recommendation" style="margin-top: 20px;">
+                <div style="font-weight: 800; font-size: 15px; margin-bottom: 8px; color: var(--accent-purple);">
+                    🏆 Recommended DNS Configurations for Your Network
+                </div>
+                <p style="margin: 0 0 12px 0;">Your current System/Gateway DNS (192.168.1.1) is already delivering optimal latency (23.1 ms avg)! Fastest public alternative: Cloudflare (1.1.1.1).</p>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 10px;">
+                    <div style="background: rgba(139, 92, 246, 0.15); border: 1px solid var(--accent-purple); padding: 12px; border-radius: 10px;">
+                        <strong style="color:var(--accent-purple)">🚀 Best for Speed & Privacy</strong><br>
+                        <strong>Cloudflare</strong><br>
+                        <small>Primary: <code>1.1.1.1</code> | Secondary: <code>1.0.0.1</code></small><br>
+                        <small>IPv6: <code>2606:4700:4700::1111</code></small>
+                    </div>
+                    <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid var(--accent-green); padding: 12px; border-radius: 10px;">
+                        <strong style="color:var(--accent-green)">🛡️ Best for Security (Malware Block)</strong><br>
+                        <strong>Quad9</strong><br>
+                        <small>Primary: <code>9.9.9.9</code> | Secondary: <code>149.112.112.112</code></small><br>
+                        <small>IPv6: <code>2620:fe::fe</code></small>
+                    </div>
+                    <div style="background: rgba(6, 182, 212, 0.15); border: 1px solid var(--accent-cyan); padding: 12px; border-radius: 10px;">
+                        <strong style="color:var(--accent-cyan)">🚫 Best for Ad & Tracker Blocking</strong><br>
+                        <strong>AdGuard DNS</strong><br>
+                        <small>Primary: <code>94.140.14.14</code> | Secondary: <code>94.140.15.15</code></small><br>
+                        <small>IPv6: <code>2a10:50c0::ad1:ff</code></small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+
+        
+        <div class="card" style="margin-top: 24px;">
+            <div class="card-title">Recent Historical Benchmark Runs</div>
+            <table>
+                <thead>
+                    <tr><th>Date / Time</th><th>Max Download</th><th>Ping</th><th>Bufferbloat</th><th>Quality Score</th></tr>
+                </thead>
+                <tbody><tr><td>2026-09-13 09:58</td><td><strong>137.6 Mbps</strong></td><td>105.9 ms</td><td><span class='badge'>D</span></td><td><strong>69.8/100</strong></td></tr><tr><td>2026-09-13 10:02</td><td><strong>0.0 Mbps</strong></td><td>264.5 ms</td><td><span class='badge'>C</span></td><td><strong>32.5/100</strong></td></tr><tr><td>2026-09-13 10:03</td><td><strong>163.9 Mbps</strong></td><td>43.1 ms</td><td><span class='badge'>D</span></td><td><strong>87.8/100</strong></td></tr><tr><td>2026-09-13 10:04</td><td><strong>141.0 Mbps</strong></td><td>58.5 ms</td><td><span class='badge'>B</span></td><td><strong>88.5/100</strong></td></tr><tr><td>2026-09-13 10:04</td><td><strong>106.9 Mbps</strong></td><td>15.0 ms</td><td><span class='badge'>F</span></td><td><strong>86.8/100</strong></td></tr><tr><td>2026-09-13 10:08</td><td><strong>129.3 Mbps</strong></td><td>36.3 ms</td><td><span class='badge'>F</span></td><td><strong>87.8/100</strong></td></tr><tr><td>2026-09-13 10:13</td><td><strong>79.0 Mbps</strong></td><td>40.9 ms</td><td><span class='badge'>F</span></td><td><strong>81.5/100</strong></td></tr><tr><td>2026-09-13 10:16</td><td><strong>98.8 Mbps</strong></td><td>102.5 ms</td><td><span class='badge'>D</span></td><td><strong>63.5/100</strong></td></tr><tr><td>2026-09-13 10:19</td><td><strong>0.0 Mbps</strong></td><td>110.0 ms</td><td><span class='badge'>D</span></td><td><strong>28.0/100</strong></td></tr><tr><td>2026-09-13 10:19</td><td><strong>67.8 Mbps</strong></td><td>68.5 ms</td><td><span class='badge'>A</span></td><td><strong>79.2/100</strong></td></tr></tbody>
+            </table>
+        </div>
+        
+    </div>
+
+    <script>
+        function toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme');
+            const next = current === 'light' ? 'dark' : 'light';
+            document.documentElement.setAttribute('data-theme', next);
+            try { localStorage.setItem('speedtest_theme', next); } catch(e) {}
+        }
+        try {
+            const saved = localStorage.getItem('speedtest_theme');
+            if (saved) document.documentElement.setAttribute('data-theme', saved);
+        } catch(e) {}
+
+        function copySummary() {
+            const summary = `🚀 Network Speed Benchmark Report\n📅 Date: 2026-09-13 10:19:44\n⚡ Max Download: 67.80 Mbps | Upload: 1.00 Mbps\n📶 Ping: 68.54 ms | Jitter: 0.0 ms | Loss: 0.0%\n🛡️ Bufferbloat: A (+12.46ms)\n⭐ Quality Score: 79.2/100 (Standard Broadband)`;
+            navigator.clipboard.writeText(summary).then(() => alert('Summary copied to clipboard!'));
+        }
+    </script>
+</body>
+</html>
