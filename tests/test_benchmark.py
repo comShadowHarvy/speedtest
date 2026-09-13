@@ -181,9 +181,11 @@ class TestFastestDNSRecommendation(unittest.TestCase):
         rec = speedtest.get_fastest_dns_recommendation(mock_dns)
         self.assertIsNotNone(rec)
         self.assertEqual(rec["name"], "Cloudflare")
-        self.assertEqual(rec["ip"], "1.1.1.1")
+        self.assertEqual(rec["primary"], "1.1.1.1")
+        self.assertEqual(rec["secondary"], "1.0.0.1")
         self.assertEqual(rec["slowest_name"], "SlowDNS")
         self.assertEqual(rec["savings_pct"], 80.0)
+        self.assertIn("1.1.1.1", rec["status_message"])
 
 
 class TestReportsExport(unittest.TestCase):
@@ -228,12 +230,24 @@ class TestReportsExport(unittest.TestCase):
                 "video_call": {"status": "Studio Quality", "score": 96.0}
             },
             "dns_recommendation": {
-                "name": "Cloudflare (1.1.1.1)",
+                "name": "Cloudflare",
                 "ip": "1.1.1.1",
+                "primary": "1.1.1.1",
+                "secondary": "1.0.0.1",
+                "ipv6_primary": "2606:4700:4700::1111",
                 "latency_ms": 5.2,
                 "savings_pct": 50.0,
-                "slowest_name": "ISP DNS (10.0.0.1)",
-                "slowest_latency_ms": 10.4
+                "features": "Fastest response time, strict privacy",
+                "status_message": "Switch to Cloudflare for 50.0% faster resolution.",
+                "leaderboard": [
+                    {"rank": 1, "name": "Cloudflare", "ip": "1.1.1.1", "latency_ms": 5.2, "category": "Ultra-Fast & Privacy"},
+                    {"rank": 2, "name": "Google", "ip": "8.8.8.8", "latency_ms": 8.1, "category": "Global Anycast"}
+                ],
+                "profiles": {
+                    "best_speed_privacy": {"name": "Cloudflare", "primary": "1.1.1.1", "secondary": "1.0.0.1", "ipv6_primary": "2606:4700:4700::1111"},
+                    "best_security": {"name": "Quad9", "primary": "9.9.9.9", "secondary": "149.112.112.112"},
+                    "best_adblocking": {"name": "AdGuard", "primary": "94.140.14.14", "secondary": "94.140.15.15"}
+                }
             },
             "dns": {
                 "dns_resolvers": {

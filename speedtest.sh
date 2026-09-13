@@ -64,6 +64,45 @@ IPV6_DNS_RESOLVERS = [
     {"name": "Quad9 IPv6", "ip": "2620:fe::fe", "port": 53},
 ]
 
+# Known DNS Provider Details & Configuration Addresses
+DNS_PROVIDER_DETAILS = {
+    "Cloudflare": {
+        "primary": "1.1.1.1",
+        "secondary": "1.0.0.1",
+        "ipv6_primary": "2606:4700:4700::1111",
+        "ipv6_secondary": "2606:4700:4700::1001",
+        "features": "Fastest response time, strict privacy (no logging)",
+    },
+    "Google": {
+        "primary": "8.8.8.8",
+        "secondary": "8.8.4.4",
+        "ipv6_primary": "2001:4860:4860::8888",
+        "ipv6_secondary": "2001:4860:4860::8844",
+        "features": "Global anycast stability, high reliability",
+    },
+    "Quad9": {
+        "primary": "9.9.9.9",
+        "secondary": "149.112.112.112",
+        "ipv6_primary": "2620:fe::fe",
+        "ipv6_secondary": "2620:fe::9",
+        "features": "Automatic malware, phishing & ransomware blocking",
+    },
+    "OpenDNS": {
+        "primary": "208.67.222.222",
+        "secondary": "208.67.220.220",
+        "ipv6_primary": "2620:119:35::35",
+        "ipv6_secondary": "2620:119:53::53",
+        "features": "Cisco security, web filtering, parental controls",
+    },
+    "AdGuard": {
+        "primary": "94.140.14.14",
+        "secondary": "94.140.15.15",
+        "ipv6_primary": "2a10:50c0::ad1:ff",
+        "ipv6_secondary": "2a10:50c0::ad2:ff",
+        "features": "System-wide ad, tracker, and malware blocking",
+    },
+}
+
 # Standard DNS lookup hostnames
 DNS_QUERIES = ["google.com", "github.com", "cloudflare.com", "wikipedia.org"]
 
@@ -397,29 +436,138 @@ def run_dns_test(
     }
 
 
+def get_dns_category(name: str, ip: str) -> str:
+    """Categorizes DNS resolver role and capability for reporting."""
+    name_lower = name.lower()
+    if "local gateway" in name_lower or "router" in name_lower:
+        return "Local Router Cache (Fastest)"
+    elif "system dns" in name_lower:
+        return "Current System Default"
+    elif "cloudflare" in name_lower:
+        return "Ultra-Fast & Privacy (No Logs)"
+    elif "google" in name_lower:
+        return "Global Anycast Reliability"
+    elif "quad9" in name_lower:
+        return "Malware & Phishing Threat Blocking"
+    elif "adguard" in name_lower:
+        return "System-Wide Ad & Tracker Blocking"
+    elif "opendns" in name_lower:
+        return "Cisco Security & Web Filtering"
+    return "Public Resolver"
+
+
 def get_fastest_dns_recommendation(dns_results: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Determine the fastest DNS resolver and calculate speedup savings percentage."""
+    """Analyze DNS benchmarking results and generate an actionable DNS recommendation with server IPs."""
     if not dns_results or not dns_results.get("dns_resolvers"):
         return None
+
     resolvers = dns_results["dns_resolvers"]
     valid = []
     for name, data in resolvers.items():
         avg = data.get("latency_ms", {}).get("avg", 0.0)
         if avg > 0:
             valid.append((name, data["resolver_ip"], avg))
-    if len(valid) < 2:
+
+    if not valid:
         return None
+
     valid.sort(key=lambda x: x[2])
-    fastest = valid[0]
-    slowest = valid[-1]
-    savings_pct = round(((slowest[2] - fastest[2]) / slowest[2]) * 100, 1) if slowest[2] > 0 else 0.0
+    overall_fastest = valid[0]
+
+    # Build ranked leaderboard
+    leaderboard = []
+    for idx, r in enumerate(valid):
+        leaderboard.append({
+            "rank": idx + 1,
+            "name": r[0],
+            "ip": r[1],
+            "latency_ms": r[2],
+            "category": get_dns_category(r[0], r[1])
+        })
+
+    # Separate public providers from system/gateway resolvers
+    public_resolvers = [r for r in valid if not r[0].startswith(("System DNS", "Local Gateway", "Router"))]
+    system_resolvers = [r for r in valid if r[0].startswith(("System DNS", "Local Gateway", "Router"))]
+
+    fastest_public = public_resolvers[0] if public_resolvers else overall_fastest
+    base_provider_name = fastest_public[0].replace(" (IPv6)", "").replace(" (DoH)", "").strip()
+    provider_info = DNS_PROVIDER_DETAILS.get(base_provider_name, {
+        "primary": fastest_public[1],
+        "secondary": "N/A",
+        "ipv6_primary": "N/A",
+        "ipv6_secondary": "N/A",
+        "features": "Low-latency public resolver",
+    })
+
+    system_avg = system_resolvers[0][2] if system_resolvers else None
+    public_avg = fastest_public[2]
+
+    if system_avg is not None:
+        if public_avg < system_avg and (system_avg - public_avg) > 3.0:
+            savings_pct = round(((system_avg - public_avg) / system_avg) * 100, 1)
+            savings_ms = round(system_avg - public_avg, 2)
+            status_msg = f"Switch to {base_provider_name} for {savings_pct}% faster resolution (saving {savings_ms} ms vs current System DNS)."
+            is_optimal = False
+        elif system_avg <= public_avg:
+            savings_pct = 0.0
+            status_msg = f"Your current System/Gateway DNS ({system_resolvers[0][1]}) is already delivering optimal latency ({system_avg:.1f} ms avg)! Fastest public alternative: {base_provider_name} ({provider_info['primary']})."
+            is_optimal = True
+        else:
+            savings_pct = 0.0
+            status_msg = f"Your current System DNS and {base_provider_name} perform similarly (~{public_avg:.1f} ms)."
+            is_optimal = True
+    else:
+        slowest = valid[-1]
+        savings_pct = round(((slowest[2] - public_avg) / slowest[2]) * 100, 1) if slowest[2] > 0 else 0.0
+        status_msg = f"Recommended: {base_provider_name} (Primary: {provider_info['primary']}, Secondary: {provider_info['secondary']}) with {public_avg:.1f} ms avg resolution."
+        is_optimal = False
+
+    quad9_info = DNS_PROVIDER_DETAILS.get("Quad9", {})
+    adguard_info = DNS_PROVIDER_DETAILS.get("AdGuard", {})
+
+    profiles = {
+        "best_speed_privacy": {
+            "name": base_provider_name,
+            "primary": provider_info["primary"],
+            "secondary": provider_info["secondary"],
+            "ipv6_primary": provider_info["ipv6_primary"],
+            "latency_ms": public_avg,
+            "features": provider_info["features"]
+        },
+        "best_security": {
+            "name": "Quad9",
+            "primary": quad9_info.get("primary", "9.9.9.9"),
+            "secondary": quad9_info.get("secondary", "149.112.112.112"),
+            "ipv6_primary": quad9_info.get("ipv6_primary", "2620:fe::fe"),
+            "features": quad9_info.get("features", "Automatic malware, phishing & threat blocking")
+        },
+        "best_adblocking": {
+            "name": "AdGuard",
+            "primary": adguard_info.get("primary", "94.140.14.14"),
+            "secondary": adguard_info.get("secondary", "94.140.15.15"),
+            "ipv6_primary": adguard_info.get("ipv6_primary", "2a10:50c0::ad1:ff"),
+            "features": adguard_info.get("features", "System-wide ad, tracker, and malware blocking")
+        }
+    }
+
     return {
-        "name": fastest[0],
-        "ip": fastest[1],
-        "latency_ms": fastest[2],
+        "name": base_provider_name,
+        "ip": provider_info["primary"],
+        "primary": provider_info["primary"],
+        "secondary": provider_info["secondary"],
+        "ipv6_primary": provider_info["ipv6_primary"],
+        "ipv6_secondary": provider_info.get("ipv6_secondary", "N/A"),
+        "latency_ms": public_avg,
         "savings_pct": savings_pct,
-        "slowest_name": slowest[0],
-        "slowest_latency_ms": slowest[2]
+        "features": provider_info["features"],
+        "status_message": status_msg,
+        "is_optimal": is_optimal,
+        "leaderboard": leaderboard,
+        "profiles": profiles,
+        "system_dns_name": system_resolvers[0][0] if system_resolvers else "N/A",
+        "system_dns_latency": system_avg if system_avg else "N/A",
+        "slowest_name": valid[-1][0],
+        "slowest_latency_ms": valid[-1][2],
     }
 
 
@@ -1553,17 +1701,44 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
         </div>
 
         {f'''
-        <!-- DNS Resolution Leaderboard -->
+        <!-- DNS Resolution Leaderboard & Recommendations -->
         <div class="card" style="margin-bottom: 24px;">
-            <div class="card-title">DNS & DoH Resolution Leaderboard</div>
-            {dns_rows}
-        </div>
-        ''' if dns_rows else ''}
+            <div class="card-title">DNS Resolution Leaderboard & Speed Ranking</div>
+            <table>
+                <thead>
+                    <tr><th>Rank</th><th>DNS Resolver</th><th>IP Address</th><th>Avg Latency</th><th>Category / Best For</th></tr>
+                </thead>
+                <tbody>
+                    {''.join([f"<tr><td><strong>{'🥇 1' if item['rank']==1 else ('🥈 2' if item['rank']==2 else ('🥉 3' if item['rank']==3 else f'#{item['rank']}'))}</strong></td><td><strong>{item['name']}</strong></td><td><code>{item['ip']}</code></td><td style='color:var(--accent-green)'><strong>{item['latency_ms']:.2f} ms</strong></td><td><span class='badge'>{item['category']}</span></td></tr>" for item in dns_rec.get("leaderboard", [])])}
+                </tbody>
+            </table>
 
-        {f'''
-        <div class="recommendation">
-            💡 <strong>Fastest DNS Recommendation:</strong> Switch to <strong>{dns_rec.get("name")}</strong> for 
-            <strong>{dns_rec.get("savings_pct")}% faster DNS resolution</strong> compared to {dns_rec.get("slowest_name")} ({dns_rec.get("slowest_latency_ms")} ms).
+            <div class="recommendation" style="margin-top: 20px;">
+                <div style="font-weight: 800; font-size: 15px; margin-bottom: 8px; color: var(--accent-purple);">
+                    🏆 Recommended DNS Configurations for Your Network
+                </div>
+                <p style="margin: 0 0 12px 0;">{dns_rec.get("status_message")}</p>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 10px;">
+                    <div style="background: rgba(139, 92, 246, 0.15); border: 1px solid var(--accent-purple); padding: 12px; border-radius: 10px;">
+                        <strong style="color:var(--accent-purple)">🚀 Best for Speed & Privacy</strong><br>
+                        <strong>{dns_rec.get('profiles', {}).get('best_speed_privacy', {}).get('name', 'Cloudflare')}</strong><br>
+                        <small>Primary: <code>{dns_rec.get('profiles', {}).get('best_speed_privacy', {}).get('primary')}</code> | Secondary: <code>{dns_rec.get('profiles', {}).get('best_speed_privacy', {}).get('secondary')}</code></small><br>
+                        <small>IPv6: <code>{dns_rec.get('profiles', {}).get('best_speed_privacy', {}).get('ipv6_primary')}</code></small>
+                    </div>
+                    <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid var(--accent-green); padding: 12px; border-radius: 10px;">
+                        <strong style="color:var(--accent-green)">🛡️ Best for Security (Malware Block)</strong><br>
+                        <strong>Quad9</strong><br>
+                        <small>Primary: <code>{dns_rec.get('profiles', {}).get('best_security', {}).get('primary', '9.9.9.9')}</code> | Secondary: <code>{dns_rec.get('profiles', {}).get('best_security', {}).get('secondary', '149.112.112.112')}</code></small><br>
+                        <small>IPv6: <code>2620:fe::fe</code></small>
+                    </div>
+                    <div style="background: rgba(6, 182, 212, 0.15); border: 1px solid var(--accent-cyan); padding: 12px; border-radius: 10px;">
+                        <strong style="color:var(--accent-cyan)">🚫 Best for Ad & Tracker Blocking</strong><br>
+                        <strong>AdGuard DNS</strong><br>
+                        <small>Primary: <code>{dns_rec.get('profiles', {}).get('best_adblocking', {}).get('primary', '94.140.14.14')}</code> | Secondary: <code>{dns_rec.get('profiles', {}).get('best_adblocking', {}).get('secondary', '94.140.15.15')}</code></small><br>
+                        <small>IPv6: <code>2a10:50c0::ad1:ff</code></small>
+                    </div>
+                </div>
+            </div>
         </div>
         ''' if dns_rec else ''}
 
@@ -1671,6 +1846,20 @@ def export_markdown_report(filepath: str, export_data: Dict[str, Any], debug: bo
 - **Gaming:** {suitability.get("gaming", {}).get("status", "N/A")} ({suitability.get("gaming", {}).get("score", 0)}/100)
 - **4K/8K Streaming:** {suitability.get("streaming", {}).get("status", "N/A")} ({suitability.get("streaming", {}).get("score", 0)}/100)
 - **Video Calls:** {suitability.get("video_call", {}).get("status", "N/A")} ({suitability.get("video_call", {}).get("score", 0)}/100)
+
+---
+
+## 💡 DNS Resolution Leaderboard & Recommendations
+
+{f"""| Rank | Resolver | IP Address | Latency | Category / Best For |
+| :---: | :--- | :--- | :---: | :--- |
+""" + "".join([f"| {'🥇 1' if item['rank']==1 else ('🥈 2' if item['rank']==2 else ('🥉 3' if item['rank']==3 else f'#{item['rank']}'))} | **{item['name']}** | `{item['ip']}` | **{item['latency_ms']:.2f} ms** | {item['category']} |\n" for item in dns_rec.get("leaderboard", [])]) + f"""
+### 🏆 Recommended Profiles for Your Network:
+- **🚀 Best for Speed & Privacy:** **{dns_rec.get('profiles', {}).get('best_speed_privacy', {}).get('name', 'Cloudflare')}** (Primary: `{dns_rec.get('profiles', {}).get('best_speed_privacy', {}).get('primary')}`, Secondary: `{dns_rec.get('profiles', {}).get('best_speed_privacy', {}).get('secondary')}` | IPv6: `{dns_rec.get('profiles', {}).get('best_speed_privacy', {}).get('ipv6_primary')}`)
+- **🛡️ Best for Security & Malware Blocking:** **Quad9** (Primary: `9.9.9.9`, Secondary: `149.112.112.112` | IPv6: `2620:fe::fe`)
+- **🚫 Best for Ad & Tracker Blocking:** **AdGuard** (Primary: `94.140.14.14`, Secondary: `94.140.15.15` | IPv6: `2a10:50c0::ad1:ff`)
+- **⚡ Status:** {dns_rec.get("status_message")}
+""" if dns_rec else "- *DNS resolution benchmarking skipped.*"}
 
 ---
 *Report generated by Network Speed Benchmark Tool v{ver}*
@@ -1920,10 +2109,10 @@ def run_benchmark_cycle(args) -> int:
     dl_ping_samples: List[float] = []
     ul_ping_samples: List[float] = []
 
-    # DNS Test in Background
+    # DNS Test in Background (Enabled by default, skipped with --no-dns)
     dns_future = None
     dns_executor = None
-    if getattr(args, "dns", False) and not getattr(args, "no_dns", False):
+    if getattr(args, "dns", True) and not getattr(args, "no_dns", False):
         if not args.quiet:
             print(f"{C.BLUE}[i] Launching Background DNS Resolution Probes...{C.RESET}\n")
         dns_executor = ThreadPoolExecutor(max_workers=1)
@@ -2049,13 +2238,44 @@ def run_benchmark_cycle(args) -> int:
         print(f"   ├─ 🎥 Streaming:  {C.CYAN}{suitability['streaming']['status']}{C.RESET}")
         print(f"   └─ 📹 Video Call: {C.CYAN}{suitability['video_call']['status']}{C.RESET}")
 
-        if dns_results:
-            print(f" {C.BOLD}DNS Latency:{C.RESET}   {C.YELLOW}{dns_results['overall_latency_ms']['avg']} ms{C.RESET}")
-            for resolver_name, resolver_data in dns_results['dns_resolvers'].items():
-                latency = resolver_data['latency_ms']['avg']
-                print(f"   └─ {resolver_name}: {C.YELLOW}{latency} ms{C.RESET}")
-            if dns_rec:
-                print(f" {C.MAGENTA}💡 DNS Tip: Switch to {dns_rec['name']} for {dns_rec['savings_pct']}% faster resolution!{C.RESET}")
+        if dns_results and dns_rec:
+            print(f"\n{C.CYAN}{C.BOLD}================================================================{C.RESET}")
+            print(f"{C.CYAN}{C.BOLD}                  DNS RESOLUTION LEADERBOARD                    {C.RESET}")
+            print(f"{C.CYAN}{C.BOLD}================================================================{C.RESET}")
+            print(f"  {C.BOLD}{'Rank':<6} {'Resolver':<30} {'Latency':<11} {'Category / Features'}{C.RESET}")
+            print(f"  {C.DIM}----------------------------------------------------------------{C.RESET}")
+
+            medals = ["🥇 1", "🥈 2", "🥉 3"]
+            for idx, item in enumerate(dns_rec.get("leaderboard", [])):
+                rank_str = medals[idx] if idx < 3 else f"   {idx+1}"
+                lat_val = item["latency_ms"]
+                lat_color = C.GREEN if lat_val < 35 else (C.YELLOW if lat_val < 100 else C.RED)
+                print(f"  {rank_str:<6} {item['name'][:29]:<30} {lat_color}{lat_val:>6.2f} ms{C.RESET}  {C.DIM}{item['category']}{C.RESET}")
+
+            print(f"  {C.DIM}----------------------------------------------------------------{C.RESET}")
+            print(f"  {C.MAGENTA}{C.BOLD}🏆 DNS Recommendations for Your Network:{C.RESET}")
+
+            # Profile 1: Best Speed & Privacy
+            speed_prof = dns_rec.get("profiles", {}).get("best_speed_privacy", dns_rec)
+            print(f"  • {C.BOLD}🚀 Best for Speed & Privacy:{C.RESET} {C.CYAN}{speed_prof.get('name')}{C.RESET} (Primary: {C.GREEN}{speed_prof.get('primary')}{C.RESET} | Secondary: {speed_prof.get('secondary')} | IPv6: {speed_prof.get('ipv6_primary')})")
+            print(f"    {C.DIM}↳ {speed_prof.get('features')}{C.RESET}")
+
+            # Profile 2: Best Security
+            sec_prof = dns_rec.get("profiles", {}).get("best_security", DNS_PROVIDER_DETAILS.get("Quad9", {}))
+            print(f"  • {C.BOLD}🛡️ Best for Security:{C.RESET} {C.CYAN}Quad9{C.RESET} (Primary: {C.GREEN}{sec_prof.get('primary')}{C.RESET} | Secondary: {sec_prof.get('secondary')})")
+            print(f"    {C.DIM}↳ {sec_prof.get('features')}{C.RESET}")
+
+            # Profile 3: Best Ad-Block
+            ad_prof = dns_rec.get("profiles", {}).get("best_adblocking", DNS_PROVIDER_DETAILS.get("AdGuard", {}))
+            print(f"  • {C.BOLD}🚫 Best for Ad Blocking:{C.RESET} {C.CYAN}AdGuard{C.RESET} (Primary: {C.GREEN}{ad_prof.get('primary')}{C.RESET} | Secondary: {ad_prof.get('secondary')})")
+            print(f"    {C.DIM}↳ {ad_prof.get('features')}{C.RESET}")
+
+            # Status Message
+            if dns_rec.get("is_optimal"):
+                print(f"  • {C.BOLD}⚡ Current Status:{C.RESET} {C.GREEN}Your current DNS ({dns_rec.get('system_dns_name')}) is already optimal ({dns_rec.get('system_dns_latency')} ms)!{C.RESET}")
+            else:
+                print(f"  • {C.BOLD}⚡ Current Status:{C.RESET} {C.YELLOW}Switching to {speed_prof.get('name')} will speed up lookups by {dns_rec.get('savings_pct')}%!{C.RESET}")
+            print(f"{C.CYAN}{C.BOLD}================================================================{C.RESET}\n")
 
         print(f"{C.MAGENTA}{C.BOLD}================================================================{C.RESET}\n")
 
@@ -2177,8 +2397,8 @@ def run_benchmark() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("-n", "--runs", type=int, default=3, help="Number of benchmark iterations (default: 3, max: 20)")
-    parser.add_argument("--dns", action="store_true", help="Run background DNS & DoH resolution tests")
-    parser.add_argument("--no-dns", action="store_true", help="Explicitly skip DNS & DoH resolution tests")
+    parser.add_argument("--dns", action="store_true", default=True, help="Run background DNS & DoH resolution tests (default: enabled)")
+    parser.add_argument("--no-dns", action="store_true", help="Explicitly disable DNS & DoH resolution tests")
     parser.add_argument("--engine", type=str, choices=["all", "speedtest", "ookla", "fast", "cloudflare", "custom"], default="all", help="Select speed engine filter (default: all)")
     parser.add_argument("--server", type=str, metavar="URL", help="Custom HTTP/HTTPS speedtest download URL to benchmark")
     parser.add_argument("--timeout", type=int, default=DOWNLOAD_TIMEOUT, metavar="SECS", help=f"Per-stream transfer timeout in seconds (default: {DOWNLOAD_TIMEOUT})")
