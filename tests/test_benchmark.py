@@ -84,6 +84,28 @@ class TestBufferbloatGrade(unittest.TestCase):
         self.assertEqual(delta, 160.0)
 
 
+class TestDirectionalBufferbloat(unittest.TestCase):
+    def test_directional_metrics(self):
+        unloaded = 15.0
+        dl_pings = [18.0, 20.0, 19.0]  # avg ~19.0 (+4ms -> A+)
+        ul_pings = [45.0, 50.0, 55.0]  # avg ~50.0 (+35ms -> C)
+        bb = speedtest.calculate_directional_bufferbloat(unloaded, dl_pings, ul_pings)
+        self.assertEqual(bb["unloaded_ping_ms"], 15.0)
+        self.assertEqual(bb["download_grade"], "A+")
+        self.assertEqual(bb["upload_grade"], "C")
+        self.assertEqual(bb["grade"], "C")
+        self.assertEqual(bb["download_delta_ms"], 4.0)
+        self.assertEqual(bb["upload_delta_ms"], 35.0)
+
+    def test_directional_empty_samples(self):
+        unloaded = 20.0
+        bb = speedtest.calculate_directional_bufferbloat(unloaded, [], [])
+        self.assertEqual(bb["download_grade"], "A+")
+        self.assertEqual(bb["upload_grade"], "A+")
+        self.assertEqual(bb["grade"], "A+")
+        self.assertEqual(bb["delta_ms"], 0.0)
+
+
 class TestSpeedTier(unittest.TestCase):
     def test_multi_gigabit(self):
         self.assertIn("Multi-Gigabit", speedtest.get_speed_tier(2500))
@@ -129,13 +151,22 @@ class TestSparkline(unittest.TestCase):
 
 
 class TestDNSQueryBuilder(unittest.TestCase):
-    def test_dns_packet_structure(self):
-        packet = speedtest.build_dns_query("google.com")
+    def test_dns_packet_structure_a(self):
+        packet = speedtest.build_dns_query("google.com", "A")
         self.assertTrue(len(packet) > 12)
         # Header ID
         self.assertEqual(packet[:2], b"\xaa\xbb")
         # Contains google and com length bytes
         self.assertIn(b"\x06google\x03com\x00", packet)
+        # Type A suffix
+        self.assertTrue(packet.endswith(b"\x00\x01\x00\x01"))
+
+    def test_dns_packet_structure_aaaa(self):
+        packet = speedtest.build_dns_query("cloudflare.com", "AAAA")
+        self.assertTrue(len(packet) > 12)
+        self.assertEqual(packet[:2], b"\xaa\xbb")
+        # Type AAAA (28 = 0x001c)
+        self.assertTrue(packet.endswith(b"\x00\x1c\x00\x01"))
 
 
 class TestFastestDNSRecommendation(unittest.TestCase):
@@ -158,13 +189,13 @@ class TestFastestDNSRecommendation(unittest.TestCase):
 class TestReportsExport(unittest.TestCase):
     def setUp(self):
         self.test_data = {
-            "timestamp": "2026-09-11T20:00:00.000000",
-            "version": "3.0.0",
+            "timestamp": "2026-09-13T12:00:00.000000",
+            "version": "3.1.0",
             "network": {
                 "lan_ip": "192.168.1.50",
                 "lan_ipv6": "Unavailable",
                 "geo": {"ip": "1.2.3.4", "isp": "Test ISP", "city": "City", "country": "Country"},
-                "adapter": {"interface": "eth0", "gateway": "192.168.1.1", "link_speed": "1.0 Gbps", "interface_type": "Ethernet", "wifi_ssid": "N/A", "wifi_signal": "N/A"}
+                "adapter": {"interface": "eth0", "gateway": "192.168.1.1", "link_speed": "1.0 Gbps", "interface_type": "Ethernet", "wifi_ssid": "N/A", "wifi_signal": "N/A", "mtu": "1500"}
             },
             "statistics": {
                 "speedtest_download_mbps": {"avg": 500.0, "min": 480.0, "max": 520.0, "median": 500.0},
@@ -172,10 +203,22 @@ class TestReportsExport(unittest.TestCase):
                 "fast_download_mbps": {"avg": 490.0},
                 "cloudflare_download_mbps": {"avg": 510.0},
                 "cloudflare_upload_mbps": {"avg": 260.0},
+                "custom_download_mbps": {"avg": 0.0},
                 "ping_ms": {"avg": 8.5},
                 "jitter_ms": 1.2,
                 "packet_loss_pct": 0.0,
-                "bufferbloat": {"grade": "A+", "delta_ms": 2.1, "unloaded_ping_ms": 8.5, "loaded_ping_ms": 10.6}
+                "bufferbloat": {
+                    "grade": "A+",
+                    "delta_ms": 2.1,
+                    "unloaded_ping_ms": 8.5,
+                    "loaded_ping_ms": 10.6,
+                    "download_loaded_ping_ms": 9.5,
+                    "download_delta_ms": 1.0,
+                    "download_grade": "A+",
+                    "upload_loaded_ping_ms": 10.6,
+                    "upload_delta_ms": 2.1,
+                    "upload_grade": "A+"
+                }
             },
             "suitability": {
                 "overall_score": 98.0,
@@ -185,12 +228,18 @@ class TestReportsExport(unittest.TestCase):
                 "video_call": {"status": "Studio Quality", "score": 96.0}
             },
             "dns_recommendation": {
-                "name": "Cloudflare",
+                "name": "Cloudflare (1.1.1.1)",
                 "ip": "1.1.1.1",
                 "latency_ms": 5.2,
                 "savings_pct": 50.0,
-                "slowest_name": "ISP DNS",
+                "slowest_name": "ISP DNS (10.0.0.1)",
                 "slowest_latency_ms": 10.4
+            },
+            "dns": {
+                "dns_resolvers": {
+                    "Cloudflare": {"resolver_ip": "1.1.1.1", "latency_ms": {"avg": 5.2, "min": 4.8, "max": 5.8}},
+                    "Google": {"resolver_ip": "8.8.8.8", "latency_ms": {"avg": 8.1, "min": 7.5, "max": 9.0}}
+                }
             }
         }
 
@@ -204,8 +253,9 @@ class TestReportsExport(unittest.TestCase):
             with open(tf_path, "r") as f:
                 content = f.read()
                 self.assertIn("Network Speed Benchmark", content)
-                self.assertIn("500.0 Mbps", content)
+                self.assertIn("500.00 Mbps", content)
                 self.assertIn("Cloudflare", content)
+                self.assertIn("Directional Bufferbloat", content)
         finally:
             if os.path.exists(tf_path):
                 os.unlink(tf_path)
@@ -221,6 +271,7 @@ class TestReportsExport(unittest.TestCase):
                 content = f.read()
                 self.assertIn("# Network Speed Benchmark Report", content)
                 self.assertIn("500.00 Mbps", content)
+                self.assertIn("Directional Bufferbloat", content)
         finally:
             if os.path.exists(tf_path):
                 os.unlink(tf_path)
