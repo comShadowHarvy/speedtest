@@ -2199,16 +2199,77 @@ def export_markdown_report(filepath: str, export_data: Dict[str, Any], debug: bo
         return False
 
 
-def open_browser_report(filepath: str) -> None:
-    """Automatically open exported HTML report in default web browser."""
+def get_preferred_browser() -> Tuple[Optional[List[str]], str]:
+    """Determine preferred browser command based on what is installed:
+    1. Firefox
+    2. Brave
+    3. Google Chrome / Chromium
+    4. System default (open/xdg-open)
+    Returns: (command_args_list, display_name)
+    """
+    # 1. Firefox
+    if shutil.which("firefox"):
+        return ["firefox"], "Firefox"
+
+    # 2. Brave
+    for cmd in ["brave", "brave-browser"]:
+        if shutil.which(cmd):
+            return [cmd], "Brave"
+
+    # 3. Google Chrome / Chromium
+    for cmd in ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]:
+        if shutil.which(cmd):
+            return [cmd], "Google Chrome"
+
+    # macOS application bundle fallbacks
+    if sys.platform == "darwin":
+        if os.path.exists("/Applications/Firefox.app"):
+            return ["open", "-a", "Firefox"], "Firefox"
+        if os.path.exists("/Applications/Brave Browser.app"):
+            return ["open", "-a", "Brave Browser"], "Brave"
+        if os.path.exists("/Applications/Google Chrome.app"):
+            return ["open", "-a", "Google Chrome"], "Google Chrome"
+        return ["open"], "default browser"
+
+    # Linux / BSD fallback
+    if shutil.which("xdg-open"):
+        return ["xdg-open"], "default browser"
+
+    return None, "default browser"
+
+
+def open_browser_report(filepath: str, quiet: bool = False, debug: bool = False) -> bool:
+    """Open exported HTML report in Firefox, Brave, or Google Chrome based on what is installed."""
     try:
         abs_path = os.path.abspath(filepath)
-        if sys.platform == "darwin":
-            subprocess.run(["open", abs_path], check=False)
-        elif os.name == "posix":
-            subprocess.run(["xdg-open", abs_path], check=False)
-    except Exception:
-        pass
+        if not os.path.exists(abs_path):
+            if not quiet:
+                print(f"{C.RED}[!] HTML report file not found: {abs_path}{C.RESET}")
+            return False
+
+        browser_cmd, browser_name = get_preferred_browser()
+        if browser_cmd:
+            cmd = browser_cmd + [abs_path]
+            if not quiet:
+                print(f" {C.GREEN}[✔] Opening HTML report in {browser_name}...{C.RESET}")
+
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            return True
+        else:
+            import webbrowser
+            if not quiet:
+                print(f" {C.GREEN}[✔] Opening HTML report in default browser...{C.RESET}")
+            webbrowser.open(f"file://{abs_path}")
+            return True
+    except Exception as e:
+        if debug:
+            print(f"{C.YELLOW}[DEBUG] Failed to open browser: {e}{C.RESET}")
+        return False
 
 
 def display_history(clear: bool = False, no_color: bool = False, show_graph: bool = True, inline: bool = False) -> int:
@@ -2711,7 +2772,7 @@ def run_benchmark_cycle(args) -> int:
             if not args.quiet and not getattr(args, "json_stdout", False):
                 print(f"{C.GREEN}[✔] Glassmorphism HTML Report exported to {args.html}{C.RESET}")
             if args.open:
-                open_browser_report(args.html)
+                open_browser_report(args.html, quiet=args.quiet, debug=args.debug)
         else:
             if not getattr(args, "json_stdout", False):
                 print(f"{C.RED}[!] Failed to write HTML report: {args.html}{C.RESET}")
@@ -2762,7 +2823,8 @@ def run_benchmark() -> int:
     parser.add_argument("--html", type=str, nargs="?", const="report.html", default="report.html", metavar="FILE", help="Export standalone interactive HTML dashboard report (default: report.html)")
     parser.add_argument("--no-html", action="store_true", help="Explicitly disable default HTML dashboard export")
     parser.add_argument("--markdown", type=str, metavar="FILE", help="Export GitHub-flavored Markdown summary report")
-    parser.add_argument("--open", action="store_true", help="Auto-open exported HTML report in default browser")
+    parser.add_argument("--open", action="store_true", help="Auto-open exported HTML report in Firefox, Brave, Chrome, or default browser")
+    parser.add_argument("--open-only", action="store_true", help="Open existing HTML report in preferred browser and exit without running benchmark")
     parser.add_argument("--json", type=str, metavar="FILE", help="Export results to a JSON file")
     parser.add_argument("--json-stdout", action="store_true", help="Output machine-readable JSON directly to stdout")
     parser.add_argument("--csv", type=str, metavar="FILE", help="Export results to a CSV file")
@@ -2784,6 +2846,11 @@ def run_benchmark() -> int:
 
     if args.no_color or args.json_stdout:
         C.disable()
+
+    if getattr(args, "open_only", False):
+        report_path = args.html if (args.html and not getattr(args, "no_html", False)) else "report.html"
+        opened = open_browser_report(report_path, quiet=args.quiet, debug=args.debug)
+        return 0 if opened else 1
 
     if args.history or args.history_clear:
         return display_history(clear=args.history_clear, no_color=args.no_color, show_graph=True)

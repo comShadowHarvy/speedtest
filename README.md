@@ -130,7 +130,8 @@ python3 speedtest.sh [options]
 -6, --ipv6              Force IPv6 network requests
 --html [FILE]           Export interactive glassmorphism HTML dashboard (default: report.html)
 --no-html               Explicitly disable HTML report export
---open                  Auto-open exported HTML report in default browser
+--open                  Auto-open exported HTML report in Firefox, Brave, Chrome, or default browser
+--open-only             Open existing HTML report in preferred browser and exit without running benchmark
 --markdown FILE         Export GitHub-flavored Markdown summary report
 --json FILE             Export structured benchmark data to a JSON file
 --json-stdout           Output machine-readable JSON directly to stdout

@@ -445,5 +445,56 @@ class TestDisplayHistory(unittest.TestCase):
         self.assertIn("Overall Historical Averages", out)
 
 
+class TestBrowserPriority(unittest.TestCase):
+    def test_firefox_priority(self):
+        def fake_which(cmd):
+            return "/usr/bin/" + cmd if cmd in ("firefox", "brave", "google-chrome") else None
+        with patch("shutil.which", side_effect=fake_which):
+            cmd, name = speedtest.get_preferred_browser()
+            self.assertEqual(cmd, ["firefox"])
+            self.assertEqual(name, "Firefox")
+
+    def test_brave_priority_when_no_firefox(self):
+        def fake_which(cmd):
+            return "/usr/bin/" + cmd if cmd in ("brave", "google-chrome") else None
+        with patch("shutil.which", side_effect=fake_which):
+            cmd, name = speedtest.get_preferred_browser()
+            self.assertEqual(cmd, ["brave"])
+            self.assertEqual(name, "Brave")
+
+    def test_chrome_priority_when_no_firefox_or_brave(self):
+        def fake_which(cmd):
+            return "/usr/bin/" + cmd if cmd == "google-chrome" else None
+        with patch("shutil.which", side_effect=fake_which):
+            cmd, name = speedtest.get_preferred_browser()
+            self.assertEqual(cmd, ["google-chrome"])
+            self.assertEqual(name, "Google Chrome")
+
+    def test_fallback_to_xdg_open(self):
+        def fake_which(cmd):
+            return "/usr/bin/xdg-open" if cmd == "xdg-open" else None
+        with patch("shutil.which", side_effect=fake_which), patch("sys.platform", "linux"):
+            cmd, name = speedtest.get_preferred_browser()
+            self.assertEqual(cmd, ["xdg-open"])
+            self.assertEqual(name, "default browser")
+
+    def test_open_browser_report_nonexistent_file(self):
+        with patch("os.path.exists", return_value=False):
+            res = speedtest.open_browser_report("nonexistent_report.html", quiet=True)
+            self.assertFalse(res)
+
+    def test_open_browser_report_launches_popen(self):
+        with patch("os.path.exists", return_value=True), \
+             patch("speedtest.get_preferred_browser", return_value=(["firefox"], "Firefox")), \
+             patch("subprocess.Popen") as mock_popen:
+            res = speedtest.open_browser_report("report.html", quiet=True)
+            self.assertTrue(res)
+            mock_popen.assert_called_once()
+            args, kwargs = mock_popen.call_args
+            self.assertEqual(args[0][0], "firefox")
+            self.assertTrue(kwargs.get("start_new_session"))
+
+
 if __name__ == "__main__":
     unittest.main()
+
