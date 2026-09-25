@@ -8,6 +8,7 @@ import sys
 import unittest
 import json
 import tempfile
+from unittest.mock import patch, MagicMock
 
 # Add parent directory to sys.path to import speedtest module functions
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -274,6 +275,23 @@ class TestReportsExport(unittest.TestCase):
             if os.path.exists(tf_path):
                 os.unlink(tf_path)
 
+    def test_export_html_report_zero_upload(self):
+        data = json.loads(json.dumps(self.test_data))
+        data["statistics"]["speedtest_upload_mbps"] = {"avg": 0.0, "min": 0.0, "max": 0.0}
+        data["statistics"]["cloudflare_upload_mbps"] = {"avg": 0.0}
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as tf:
+            tf_path = tf.name
+        try:
+            success = speedtest.export_html_report(tf_path, data)
+            self.assertTrue(success)
+            with open(tf_path, "r") as f:
+                content = f.read()
+                self.assertNotIn("1.00 Mbps", content)
+                self.assertIn("N/A", content)
+        finally:
+            if os.path.exists(tf_path):
+                os.unlink(tf_path)
+
     def test_export_markdown_report(self):
         with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as tf:
             tf_path = tf.name
@@ -289,6 +307,90 @@ class TestReportsExport(unittest.TestCase):
         finally:
             if os.path.exists(tf_path):
                 os.unlink(tf_path)
+
+
+class TestIPv6Availability(unittest.TestCase):
+    @patch("socket.socket")
+    def test_ipv6_available_success(self, mock_socket_cls):
+        mock_sock = mock_socket_cls.return_value
+        mock_sock.__enter__.return_value = mock_sock
+        mock_sock.connect.return_value = None
+        self.assertTrue(speedtest.is_ipv6_available())
+
+    @patch("socket.socket")
+    def test_ipv6_available_failure(self, mock_socket_cls):
+        mock_sock = mock_socket_cls.return_value
+        mock_sock.__enter__.return_value = mock_sock
+        mock_sock.connect.side_effect = OSError("Network is unreachable")
+        self.assertFalse(speedtest.is_ipv6_available())
+
+
+class TestIdlePingMeasurement(unittest.TestCase):
+    @patch("subprocess.run")
+    def test_idle_ping_icmp_success(self, mock_run):
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = """
+64 bytes from 1.1.1.1: icmp_seq=1 ttl=57 time=10.2 ms
+64 bytes from 1.1.1.1: icmp_seq=2 ttl=57 time=12.8 ms
+64 bytes from 1.1.1.1: icmp_seq=3 ttl=57 time=11.0 ms
+--- 1.1.1.1 ping statistics ---
+3 packets transmitted, 3 received, 0.0% packet loss
+"""
+        mock_run.return_value = mock_proc
+        res = speedtest.measure_idle_ping(host="1.1.1.1", count=3)
+        self.assertEqual(res["loss"], 0.0)
+        self.assertEqual(len(res["samples"]), 3)
+        self.assertEqual(res["stats"]["min"], 10.2)
+        self.assertEqual(res["stats"]["max"], 12.8)
+        self.assertGreater(res["stats"]["avg"], 10.0)
+
+
+class TestOoklaNativeMetrics(unittest.TestCase):
+    @patch("shutil.which", return_value="/usr/bin/speedtest")
+    @patch("subprocess.run")
+    def test_ookla_json_iqm_parsing(self, mock_run, mock_which):
+        sample_ookla_json = {
+            "download": {"bandwidth": 125000000, "latency": {"iqm": 14.5}},
+            "upload": {"bandwidth": 62500000, "latency": {"iqm": 22.3}},
+            "ping": {"latency": 9.2, "jitter": 1.1}
+        }
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = json.dumps(sample_ookla_json)
+        mock_run.return_value = mock_proc
+
+        res = speedtest.get_speedtest(debug=False, retries=0)
+        self.assertIsNotNone(res)
+        self.assertEqual(res["download"], 1000.0)  # 125M bytes/s * 8 / 1M = 1000 Mbps
+        self.assertEqual(res["upload"], 500.0)     # 62.5M bytes/s * 8 / 1M = 500 Mbps
+        self.assertEqual(res["ping"], 9.2)
+        self.assertEqual(res["jitter"], 1.1)
+        self.assertEqual(res["dl_latency"], 14.5)
+        self.assertEqual(res["ul_latency"], 22.3)
+        self.assertEqual(res["engine_type"], "Ookla Native")
+
+
+class TestDNSProfiles(unittest.TestCase):
+    def test_profiles_structure(self):
+        mock_dns = {
+            "dns_resolvers": {
+                "Cloudflare": {"resolver_ip": "1.1.1.1", "latency_ms": {"avg": 8.0}},
+                "Quad9": {"resolver_ip": "9.9.9.9", "latency_ms": {"avg": 12.0}},
+                "AdGuard": {"resolver_ip": "94.140.14.14", "latency_ms": {"avg": 15.0}},
+                "CleanBrowsing": {"resolver_ip": "185.228.168.168", "latency_ms": {"avg": 20.0}},
+            }
+        }
+        rec = speedtest.get_fastest_dns_recommendation(mock_dns)
+        self.assertIn("profiles", rec)
+        profiles = rec["profiles"]
+        self.assertIn("best_speed_privacy", profiles)
+        self.assertIn("best_security", profiles)
+        self.assertIn("best_adblocking", profiles)
+        self.assertIn("best_reliability", profiles)
+        self.assertEqual(profiles["best_security"]["name"], "Quad9")
+        self.assertEqual(profiles["best_adblocking"]["name"], "AdGuard")
+        self.assertEqual(profiles["best_reliability"]["name"], "Google")
 
 
 if __name__ == "__main__":

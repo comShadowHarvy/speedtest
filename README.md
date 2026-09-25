@@ -2,7 +2,7 @@
 
 A high-performance, cross-platform CLI tool for network speed benchmarking, dual-stack IPv4/IPv6 diagnostics, directional bufferbloat analysis (DL/UL), DNS & DoH resolution tests, hardware link speed detection, interactive HTML dashboard generation, and SLA threshold monitoring.
 
-**Version: 3.1.0** | Universal Shell Execution, Multi-Gigabit Saturation, Directional Bufferbloat (DL/UL), Dual-Stack IPv4/IPv6, Hardware Link Speeds, Live Throughput Progress, Unicode Sparklines, DoH Benchmarking, and Glassmorphism Dashboard
+**Version: 3.2.0** | Universal Shell Execution, Multi-Gigabit Saturation, Parallelized DNS Engine, Specialized DNS Profiles, Directional Bufferbloat (DL/UL), Dual-Stack IPv4/IPv6, Hardware Link Speeds, Unicode Sparklines, DoH Benchmarking, and Modern Glassmorphism Dashboard
 
 ---
 
@@ -10,26 +10,33 @@ A high-performance, cross-platform CLI tool for network speed benchmarking, dual
 
 - **Universal Shell Execution**: Runs seamlessly via `./speedtest.sh`, `bash speedtest.sh`, `sh speedtest.sh`, or `python3 speedtest.sh`.
 - **Multi-Engine Speed Testing**:
-  - **Ookla (Speedtest.net)**: Native official Ookla binary auto-detection (`speedtest --format=json`) with fallback to `speedtest-cli`.
-  - **Fast.com (Netflix CDN)**: Multi-stream adaptive chunking (saturates 1Gbps+ connections).
-  - **Cloudflare CDN**: Multi-worker parallel download & streaming upload tests.
+  - **Ookla (Speedtest.net)**: Native official Ookla binary auto-detection (`speedtest --format=json`) with native IQM loaded latency extraction, falling back to `speedtest-cli`.
+  - **Fast.com (Netflix CDN)**: Multi-stream adaptive chunking (saturates 1Gbps+ connections) with resilient JS token extraction.
+  - **Cloudflare CDN**: Multi-worker parallel download & streaming upload tests with automatic temporary file cleanup.
   - **Custom Server (`--server <URL>`)**: Benchmark any custom HTTP/HTTPS CDN or endpoint.
 - **Engine Filter (`--engine`)**: Select specific engines (`cloudflare`, `fast`, `speedtest`, `ookla`, `custom`, `all`).
 - **Directional Bufferbloat & Loaded Latency ($A^+$ to $F$)**:
-  - Measures baseline idle ping vs. active download loaded ping vs. active upload loaded ping.
+  - Measures authentic baseline idle ping vs. active download loaded ping vs. active upload loaded ping.
   - Calculates directional latency deltas ($\Delta$ ms) and assigns distinct letter grades for Download and Upload bufferbloat.
-- **Dual-Stack IPv4 & IPv6 Support**: Automatic dual-stack detection with `-4` / `--ipv4` and `-6` / `--ipv6` switches.
-- **Packet Loss Diagnostics**: Measures ICMP ping loss percentage ($0\%$ to $100\%$) with UDP socket probe fallback.
-- **System, Gateway & DoH DNS Benchmarks**:
+- **Dedicated Baseline Idle Ping & Jitter**: Accurate baseline RTT measurement via ICMP ping with UDP socket probe fallback, ensuring accurate metrics even on download-only benchmarks.
+- **Dual-Stack IPv4 & IPv6 with Route Verification**: Automatic dual-stack detection with `-4` / `--ipv4` and `-6` / `--ipv6` switches, with proactive route availability probes to avoid unrouted IPv6 hangs.
+- **High-Speed Parallelized DNS Resolution Engine**:
+  - Concurrent thread pool for DNS resolver benchmarking (cuts test time by over 10x).
   - Benchmarks system `/etc/resolv.conf`, `resolvectl`, `nmcli`, `scutil` (macOS), Android `getprop`, and Local Gateway IP.
   - Tests public IPv4 & IPv6 resolvers: Cloudflare, Google, Quad9, OpenDNS, AdGuard.
   - Tests DNS-over-HTTPS (DoH) latencies.
-  - Calculates fastest DNS recommendation and resolution speedup percentage.
-- **Hardware & Network Adapter Diagnostics**: Detects active network interface, connection type (Ethernet, Wi-Fi, VPN), NIC Link Speed (e.g., 1.0 Gbps / 2.5 Gbps / 10 Gbps), Wi-Fi SSID, Signal dBm & %, Channel, Frequency Band (2.4/5/6 GHz), and MTU.
-- **Interactive Glassmorphism HTML Dashboard (`--html` + `--open`)**: Self-contained, responsive dashboard with dark/light mode toggle (saved to `localStorage`), SVG score gauge, speed comparison charts, copy summary button, and PDF printing support (100% offline-ready).
+- **Specialized Multi-Profile DNS Recommendations**:
+  - Tailored recommendations across 4 specialized profiles:
+    - 🚀 **Speed & Privacy**: Cloudflare (`1.1.1.1` / `1.0.0.1` / `2606:4700:4700::1111`)
+    - 🛡️ **Threat & Malware Protection**: Quad9 (`9.9.9.9` / `149.112.112.112`)
+    - 🚫 **Ad & Tracker Blocking**: AdGuard (`94.140.14.14` / `94.140.15.15`)
+    - 🌐 **Global Anycast Reliability**: Google Public DNS (`8.8.8.8` / `8.8.4.4`)
+  - Displays dynamic latency benchmarks, rank, and percentage speedup vs. current system resolver.
+- **Hardware & Network Adapter Diagnostics**: Detects active network interface, connection type (Ethernet, Wi-Fi, VPN), NIC Link Speed (e.g., 1.0 Gbps / 2.5 Gbps / 10 Gbps), Wi-Fi SSID, Signal dBm & %, Channel, Frequency Band (2.4/5/6 GHz), and MTU (including `/proc/net/wireless` and macOS `scutil` fallbacks).
+- **Interactive Glassmorphism HTML Dashboard (`--html` + `--open`)**: Self-contained, responsive dashboard with Outfit & JetBrains Mono typography, animated SVG score gauge, directional bufferbloat visualizer, 1-click copy for DNS IPs with toast notifications, client-side JSON export, dark/light mode toggle (saved to `localStorage`), and PDF printing support (100% offline-ready).
 - **Terminal Sparklines & History (`--history` & `--history-graph`)**: Visualizes historical speed trends directly in the terminal using Unicode sparklines (` ▂▃▅▆▇█`).
 - **SLA Threshold Alerts**: Set minimum download/upload thresholds or max latency limits (`--threshold-dl`, `--threshold-ul`, `--threshold-ping`) for automated monitoring and CI/CD pipelines (exits with code `3` if violated).
-- **Data Export Formats**: Structured JSON, stdout JSON (`--json-stdout`), CSV, GitHub Markdown (`--markdown`), and HTML.
+- **Data Export Formats**: Structured JSON, stdout JSON (`--json-stdout`), CSV (with DL/UL latency & jitter columns), GitHub Markdown (`--markdown`), and HTML.
 - **Continuous Monitoring Mode (`--monitor`)**: Periodically logs speed benchmarks on a custom interval to track ISP performance 24/7.
 - **Multi-Platform Support**: Works on Arch Linux, Fedora, Debian/Ubuntu, openSUSE, Alpine, Void, Solus, macOS, Bazzite, and Termux.
 
