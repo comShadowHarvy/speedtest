@@ -8,6 +8,7 @@ import sys
 import unittest
 import json
 import tempfile
+import io
 from unittest.mock import patch, MagicMock
 
 # Add parent directory to sys.path to import speedtest module functions
@@ -391,6 +392,57 @@ class TestDNSProfiles(unittest.TestCase):
         self.assertEqual(profiles["best_security"]["name"], "Quad9")
         self.assertEqual(profiles["best_adblocking"]["name"], "AdGuard")
         self.assertEqual(profiles["best_reliability"]["name"], "Google")
+
+
+class TestPrintDNSLeaderboard(unittest.TestCase):
+    def test_print_leaderboard_output(self):
+        mock_dns = {
+            "dns_resolvers": {
+                "Cloudflare": {"resolver_ip": "1.1.1.1", "latency_ms": {"avg": 8.0}},
+                "Quad9": {"resolver_ip": "9.9.9.9", "latency_ms": {"avg": 12.0}},
+            }
+        }
+        rec = speedtest.get_fastest_dns_recommendation(mock_dns)
+        buf = io.StringIO()
+        with patch("sys.stdout", buf):
+            speedtest.print_dns_leaderboard(rec)
+        out = buf.getvalue()
+        self.assertIn("DNS RESOLUTION LEADERBOARD", out)
+        self.assertIn("Cloudflare", out)
+        self.assertIn("Quad9", out)
+        self.assertIn("Best for Speed & Privacy", out)
+
+
+class TestDisplayHistory(unittest.TestCase):
+    def test_display_history_inline_no_file(self):
+        buf = io.StringIO()
+        with patch("os.path.exists", return_value=False), patch("sys.stdout", buf):
+            speedtest.display_history(inline=True)
+        out = buf.getvalue()
+        self.assertIn("No prior benchmark history found yet", out)
+
+    def test_display_history_inline_with_data(self):
+        sample_history = [{
+            "timestamp": "2026-09-25T12:00:00",
+            "network": {"geo": {"isp": "TestISP"}, "adapter": {"interface": "eth0"}},
+            "statistics": {
+                "speedtest_download_mbps": {"avg": 500.0},
+                "cloudflare_download_mbps": {"avg": 450.0},
+                "ping_ms": {"avg": 10.0},
+                "bufferbloat": {"grade": "A+", "delta_ms": 2.0}
+            },
+            "suitability": {"overall_score": 95.0}
+        }]
+        buf = io.StringIO()
+        with patch("os.path.exists", return_value=True), \
+             patch("builtins.open", unittest.mock.mock_open(read_data=json.dumps(sample_history))), \
+             patch("sys.stdout", buf):
+            speedtest.display_history(inline=True, show_graph=True)
+        out = buf.getvalue()
+        self.assertIn("PRIOR BENCHMARK HISTORY & TRENDS", out)
+        self.assertIn("TestISP", out)
+        self.assertIn("500.0 M", out)
+        self.assertIn("Overall Historical Averages", out)
 
 
 if __name__ == "__main__":

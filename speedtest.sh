@@ -628,6 +628,51 @@ def get_fastest_dns_recommendation(dns_results: Optional[Dict[str, Any]]) -> Opt
     }
 
 
+def print_dns_leaderboard(dns_rec: Dict[str, Any], width: int = 76) -> None:
+    """Print formatted DNS leaderboard and smart recommendation profiles."""
+    top_bar = "═" * width
+    h_line = "─" * width
+    print(f"\n{C.CYAN}{C.BOLD}{top_bar}{C.RESET}")
+    print(f"{C.CYAN}{C.BOLD}{'DNS RESOLUTION LEADERBOARD':^{width}}{C.RESET}")
+    print(f"{C.CYAN}{C.BOLD}{top_bar}{C.RESET}")
+    print(f"  {C.BOLD}{'Rank':<8} {'Resolver':<28} {'Latency':<12} {'Category / Features'}{C.RESET}")
+    print(f"  {C.DIM}{h_line}{C.RESET}")
+
+    for idx, item in enumerate(dns_rec.get("leaderboard", [])):
+        rank_str = f"#{idx+1}"
+        badge = ["🥇", "🥈", "🥉"][idx] if idx < 3 else "  "
+        display_rank = f"{badge} {rank_str:<4}"
+        lat_val = item["latency_ms"]
+        lat_color = C.GREEN if lat_val < 35 else (C.YELLOW if lat_val < 100 else C.RED)
+        print(f"  {display_rank:<8} {item['name'][:27]:<28} {lat_color}{lat_val:>6.2f} ms{C.RESET}   {C.DIM}{item['category']}{C.RESET}")
+
+    print(f"  {C.DIM}{h_line}{C.RESET}")
+    print(f"  {C.MAGENTA}{C.BOLD}🏆 DNS Recommendations for Your Network:{C.RESET}")
+
+    # Profile 1: Best Speed & Privacy
+    speed_prof = dns_rec.get("profiles", {}).get("best_speed_privacy", dns_rec)
+    v6_part = f" | IPv6: {speed_prof.get('ipv6_primary')}" if speed_prof.get('ipv6_primary') else ""
+    print(f"  • {C.BOLD}🚀 Best for Speed & Privacy:{C.RESET} {C.CYAN}{speed_prof.get('name')}{C.RESET} (Primary: {C.GREEN}{speed_prof.get('primary')}{C.RESET} | Secondary: {speed_prof.get('secondary')}{v6_part})")
+    print(f"    {C.DIM}↳ {speed_prof.get('features')}{C.RESET}")
+
+    # Profile 2: Best Security
+    sec_prof = dns_rec.get("profiles", {}).get("best_security", DNS_PROVIDER_DETAILS.get("Quad9", {}))
+    print(f"  • {C.BOLD}🛡️ Best for Security:{C.RESET} {C.CYAN}Quad9{C.RESET} (Primary: {C.GREEN}{sec_prof.get('primary')}{C.RESET} | Secondary: {sec_prof.get('secondary')})")
+    print(f"    {C.DIM}↳ {sec_prof.get('features')}{C.RESET}")
+
+    # Profile 3: Best Ad-Block
+    ad_prof = dns_rec.get("profiles", {}).get("best_adblocking", DNS_PROVIDER_DETAILS.get("AdGuard", {}))
+    print(f"  • {C.BOLD}🚫 Best for Ad Blocking:{C.RESET} {C.CYAN}AdGuard{C.RESET} (Primary: {C.GREEN}{ad_prof.get('primary')}{C.RESET} | Secondary: {ad_prof.get('secondary')})")
+    print(f"    {C.DIM}↳ {ad_prof.get('features')}{C.RESET}")
+
+    # Status Message
+    if dns_rec.get("is_optimal"):
+        print(f"  • {C.BOLD}⚡ Current Status:{C.RESET} {C.GREEN}Your current DNS ({dns_rec.get('system_dns_name')}) is already optimal ({dns_rec.get('system_dns_latency')} ms)!{C.RESET}")
+    else:
+        print(f"  • {C.BOLD}⚡ Current Status:{C.RESET} {C.YELLOW}Switching to {speed_prof.get('name')} will speed up lookups by {dns_rec.get('savings_pct')}%!{C.RESET}")
+    print(f"{C.CYAN}{C.BOLD}{top_bar}{C.RESET}\n")
+
+
 def measure_idle_ping(
     host: Optional[str] = None,
     count: int = 5,
@@ -2166,7 +2211,7 @@ def open_browser_report(filepath: str) -> None:
         pass
 
 
-def display_history(clear: bool = False, no_color: bool = False, show_graph: bool = True) -> int:
+def display_history(clear: bool = False, no_color: bool = False, show_graph: bool = True, inline: bool = False) -> int:
     """Displays formatted historical benchmark trends and sparkline graphs."""
     if no_color:
         C.disable()
@@ -2179,25 +2224,38 @@ def display_history(clear: bool = False, no_color: bool = False, show_graph: boo
         return 0
 
     if not os.path.exists(HISTORY_FILE):
-        print(f"{C.YELLOW}[i] No benchmark history found. Run a speed test first!{C.RESET}")
+        if inline:
+            print(f" {C.DIM}[i] No prior benchmark history found yet. Results from this run will be saved.{C.RESET}\n")
+        else:
+            print(f"{C.YELLOW}[i] No benchmark history found. Run a speed test first!{C.RESET}")
         return 0
 
     try:
         with open(HISTORY_FILE, "r") as f:
             history = json.load(f)
     except Exception as e:
-        print(f"{C.RED}[!] Failed to read history file: {e}{C.RESET}")
+        if inline:
+            print(f" {C.YELLOW}[i] Could not read prior history file: {e}{C.RESET}\n")
+        else:
+            print(f"{C.RED}[!] Failed to read history file: {e}{C.RESET}")
         return 1
 
     if not history:
-        print(f"{C.YELLOW}[i] Benchmark history is empty.{C.RESET}")
+        if inline:
+            print(f" {C.DIM}[i] Benchmark history is currently empty.{C.RESET}\n")
+        else:
+            print(f"{C.YELLOW}[i] Benchmark history is empty.{C.RESET}")
         return 0
 
-    print(f"\n{C.MAGENTA}{C.BOLD}========================================================================================{C.RESET}")
-    print(f"{C.MAGENTA}{C.BOLD}                                HISTORICAL BENCHMARK LOGS                                {C.RESET}")
-    print(f"{C.MAGENTA}{C.BOLD}========================================================================================{C.RESET}")
+    w = 88
+    top_bar = "═" * w
+    h_line = "─" * w
+    title = "PRIOR BENCHMARK HISTORY & TRENDS" if inline else "HISTORICAL BENCHMARK LOGS"
+    print(f"\n{C.MAGENTA}{C.BOLD}{top_bar}{C.RESET}")
+    print(f"{C.MAGENTA}{C.BOLD}{title:^{w}}{C.RESET}")
+    print(f"{C.MAGENTA}{C.BOLD}{top_bar}{C.RESET}")
     print(f"{C.BOLD}  Date/Time          ISP / Interface   Ookla DL   Fast DL   CF DL     Ping     Bufferbloat  Score{C.RESET}")
-    print(f"{C.DIM}  ----------------------------------------------------------------------------------------{C.RESET}")
+    print(f"{C.DIM}  {h_line[:86]}{C.RESET}")
 
     ookla_dls, fast_dls, cf_dls, pings, scores = [], [], [], [], []
 
@@ -2238,7 +2296,7 @@ def display_history(clear: bool = False, no_color: bool = False, show_graph: boo
 
         print(f"  {dt:<18} {if_info:<17} {st_str:<10} {fast_str:<9} {cf_str:<9} {ping_str:<8} {bb_str:<12} {score_str}")
 
-    print(f"{C.MAGENTA}{C.BOLD}========================================================================================{C.RESET}")
+    print(f"{C.MAGENTA}{C.BOLD}{top_bar}{C.RESET}")
     print(f"{C.BOLD} Overall Historical Averages ({len(history)} total runs):{C.RESET}")
     st_avg = round(sum(ookla_dls) / len(ookla_dls), 2) if ookla_dls else 0.0
     fast_avg = round(sum(fast_dls) / len(fast_dls), 2) if fast_dls else 0.0
@@ -2258,7 +2316,7 @@ def display_history(clear: bool = False, no_color: bool = False, show_graph: boo
             spark = generate_sparkline(all_speeds)
             print(f"  Speed Trend ({len(all_speeds)} runs): [{C.CYAN}{spark}{C.RESET}] (min: {min(all_speeds):.1f} Mbps, max: {max(all_speeds):.1f} Mbps)")
 
-    print(f"{C.MAGENTA}{C.BOLD}========================================================================================{C.RESET}\n")
+    print(f"{C.MAGENTA}{C.BOLD}{top_bar}{C.RESET}\n")
     return 0
 
 
@@ -2401,15 +2459,38 @@ def run_benchmark_cycle(args) -> int:
     dl_ping_samples: List[float] = []
     ul_ping_samples: List[float] = []
 
-    # DNS Test in Background (Enabled by default, skipped with --no-dns)
-    dns_future = None
-    dns_executor = None
+    # 1. DNS Resolution Probes (Fast parallel execution, ~1-1.5s)
+    dns_results: Optional[Dict[str, Any]] = None
+    dns_rec: Optional[Dict[str, Any]] = None
     if getattr(args, "dns", True) and not getattr(args, "no_dns", False):
-        if not args.quiet:
-            print(f"{C.BLUE}[i] Launching Background DNS Resolution Probes...{C.RESET}\n")
-        dns_executor = ThreadPoolExecutor(max_workers=1)
-        enable_v6 = getattr(args, "ipv6", False) or not getattr(args, "ipv4", False)
-        dns_future = dns_executor.submit(run_dns_test, args.runs, True, args.debug, adapter.get("gateway"), True, enable_v6)
+        sp_dns = Spinner("Benchmarking DNS Resolvers & Latency", quiet=args.quiet)
+        sp_dns.start()
+        try:
+            enable_v6 = getattr(args, "ipv6", False) or not getattr(args, "ipv4", False)
+            dns_results = run_dns_test(
+                runs=min(args.runs, 3),
+                quiet=True,
+                debug=args.debug,
+                gateway_ip=adapter.get("gateway"),
+                test_doh=True,
+                enable_ipv6=enable_v6
+            )
+            dns_rec = get_fastest_dns_recommendation(dns_results)
+            sp_dns.stop("DNS Resolution Probes completed.")
+        except Exception as e:
+            sp_dns.stop(f"DNS Resolution Probes encountered an issue: {e}")
+            dns_results = None
+
+        if not getattr(args, "json_stdout", False) and not args.quiet and dns_rec:
+            print_dns_leaderboard(dns_rec)
+
+    # 2. Display Historical Benchmark Results immediately after DNS test
+    if not getattr(args, "json_stdout", False) and not args.quiet:
+        display_history(no_color=args.no_color, show_graph=True, inline=True)
+
+    # 3. Active Speed Benchmarks for Current Setup
+    if not args.quiet and not getattr(args, "json_stdout", False):
+        print(f"{C.CYAN}{C.BOLD}🚀 Starting active speed benchmark tests for current setup...{C.RESET}\n")
 
     # Engine Filtering
     target_engine = getattr(args, "engine", "all")
@@ -2456,14 +2537,6 @@ def run_benchmark_cycle(args) -> int:
                 custom_results.append(res)
             time.sleep(0.3)
 
-    if dns_future:
-        try:
-            dns_results = dns_future.result(timeout=20)
-        except Exception:
-            dns_results = None
-        if dns_executor:
-            dns_executor.shutdown(wait=False)
-
     st_dls = [r["download"] for r in st_results if r.get("download")]
     st_uls = [r["upload"] for r in st_results if r.get("upload")]
     st_pings = [r["ping"] for r in st_results if r.get("ping")]
@@ -2506,7 +2579,8 @@ def run_benchmark_cycle(args) -> int:
     max_ul = max(st_ul_stats["avg"], cf_ul_stats["avg"])
 
     suitability = calculate_network_suitability(max_dl, max_ul, ping_stats["avg"], jitter, bb_grade, packet_loss)
-    dns_rec = get_fastest_dns_recommendation(dns_results)
+    if not dns_rec and dns_results:
+        dns_rec = get_fastest_dns_recommendation(dns_results)
 
     # Console Summary Display
     if not getattr(args, "json_stdout", False):
@@ -2547,46 +2621,12 @@ def run_benchmark_cycle(args) -> int:
         print(f"   ├─ 🎥 Streaming:  {C.CYAN}{suitability['streaming']['status']}{C.RESET}")
         print(f"   └─ 📹 Video Call: {C.CYAN}{suitability['video_call']['status']}{C.RESET}")
 
-        if dns_results and dns_rec:
-            print(f"\n{C.CYAN}{C.BOLD}{top_bar}{C.RESET}")
-            print(f"{C.CYAN}{C.BOLD}{'DNS RESOLUTION LEADERBOARD':^{w}}{C.RESET}")
-            print(f"{C.CYAN}{C.BOLD}{top_bar}{C.RESET}")
-            print(f"  {C.BOLD}{'Rank':<8} {'Resolver':<28} {'Latency':<12} {'Category / Features'}{C.RESET}")
-            print(f"  {C.DIM}{h_line}{C.RESET}")
-
-            for idx, item in enumerate(dns_rec.get("leaderboard", [])):
-                rank_str = f"#{idx+1}"
-                badge = ["🥇", "🥈", "🥉"][idx] if idx < 3 else "  "
-                display_rank = f"{badge} {rank_str:<4}"
-                lat_val = item["latency_ms"]
-                lat_color = C.GREEN if lat_val < 35 else (C.YELLOW if lat_val < 100 else C.RED)
-                print(f"  {display_rank:<8} {item['name'][:27]:<28} {lat_color}{lat_val:>6.2f} ms{C.RESET}   {C.DIM}{item['category']}{C.RESET}")
-
-            print(f"  {C.DIM}{h_line}{C.RESET}")
-            print(f"  {C.MAGENTA}{C.BOLD}🏆 DNS Recommendations for Your Network:{C.RESET}")
-
-            # Profile 1: Best Speed & Privacy
-            speed_prof = dns_rec.get("profiles", {}).get("best_speed_privacy", dns_rec)
-            v6_part = f" | IPv6: {speed_prof.get('ipv6_primary')}" if speed_prof.get('ipv6_primary') else ""
-            print(f"  • {C.BOLD}🚀 Best for Speed & Privacy:{C.RESET} {C.CYAN}{speed_prof.get('name')}{C.RESET} (Primary: {C.GREEN}{speed_prof.get('primary')}{C.RESET} | Secondary: {speed_prof.get('secondary')}{v6_part})")
-            print(f"    {C.DIM}↳ {speed_prof.get('features')}{C.RESET}")
-
-            # Profile 2: Best Security
-            sec_prof = dns_rec.get("profiles", {}).get("best_security", DNS_PROVIDER_DETAILS.get("Quad9", {}))
-            print(f"  • {C.BOLD}🛡️ Best for Security:{C.RESET} {C.CYAN}Quad9{C.RESET} (Primary: {C.GREEN}{sec_prof.get('primary')}{C.RESET} | Secondary: {sec_prof.get('secondary')})")
-            print(f"    {C.DIM}↳ {sec_prof.get('features')}{C.RESET}")
-
-            # Profile 3: Best Ad-Block
-            ad_prof = dns_rec.get("profiles", {}).get("best_adblocking", DNS_PROVIDER_DETAILS.get("AdGuard", {}))
-            print(f"  • {C.BOLD}🚫 Best for Ad Blocking:{C.RESET} {C.CYAN}AdGuard{C.RESET} (Primary: {C.GREEN}{ad_prof.get('primary')}{C.RESET} | Secondary: {ad_prof.get('secondary')})")
-            print(f"    {C.DIM}↳ {ad_prof.get('features')}{C.RESET}")
-
-            # Status Message
+        if dns_rec:
             if dns_rec.get("is_optimal"):
-                print(f"  • {C.BOLD}⚡ Current Status:{C.RESET} {C.GREEN}Your current DNS ({dns_rec.get('system_dns_name')}) is already optimal ({dns_rec.get('system_dns_latency')} ms)!{C.RESET}")
+                opt_str = f"{C.GREEN}Optimal ({dns_rec.get('system_dns_latency')} ms){C.RESET}"
             else:
-                print(f"  • {C.BOLD}⚡ Current Status:{C.RESET} {C.YELLOW}Switching to {speed_prof.get('name')} will speed up lookups by {dns_rec.get('savings_pct')}%!{C.RESET}")
-            print(f"{C.CYAN}{C.BOLD}{top_bar}{C.RESET}\n")
+                opt_str = f"{C.YELLOW}+{dns_rec.get('savings_pct')}% faster via {dns_rec.get('name')}{C.RESET} {C.DIM}({dns_rec.get('primary')} - {dns_rec.get('latency_ms')} ms){C.RESET}"
+            print(f" {C.BOLD}DNS Status:{C.RESET}     {opt_str}")
 
         print(f"{C.MAGENTA}{C.BOLD}{top_bar}{C.RESET}\n")
 
@@ -2666,14 +2706,15 @@ def run_benchmark_cycle(args) -> int:
             print(f"{C.RED}[!] Failed to write Markdown report: {args.markdown}{C.RESET}")
             exit_code = 1
 
-    if args.html:
+    if args.html and not getattr(args, "no_html", False):
         if export_html_report(args.html, export_data, args.debug):
-            if not args.quiet:
+            if not args.quiet and not getattr(args, "json_stdout", False):
                 print(f"{C.GREEN}[✔] Glassmorphism HTML Report exported to {args.html}{C.RESET}")
             if args.open:
                 open_browser_report(args.html)
         else:
-            print(f"{C.RED}[!] Failed to write HTML report: {args.html}{C.RESET}")
+            if not getattr(args, "json_stdout", False):
+                print(f"{C.RED}[!] Failed to write HTML report: {args.html}{C.RESET}")
             exit_code = 1
 
     # SLA Threshold Checks
@@ -2701,7 +2742,7 @@ def run_benchmark() -> int:
     parser = argparse.ArgumentParser(
         description=f"Network Speed & Diagnostic Benchmark Tool v{VERSION} by Shadowharvy",
         epilog="Examples:\n"
-               "  speedtest.sh -n 3 --dns --html report.html --open\n"
+               "  speedtest.sh -n 3 --dns --open\n"
                "  speedtest.sh --engine cloudflare --threshold-dl 100\n"
                "  speedtest.sh --history --history-graph\n"
                "  speedtest.sh --json-stdout | jq .",
@@ -2718,7 +2759,8 @@ def run_benchmark() -> int:
     parser.add_argument("--history", action="store_true", help="Display historical benchmark trends and averages")
     parser.add_argument("--history-graph", action="store_true", help="Render sparkline trend graph with history")
     parser.add_argument("--history-clear", action="store_true", help="Clear historical benchmark log file")
-    parser.add_argument("--html", type=str, metavar="FILE", help="Export standalone interactive HTML dashboard report")
+    parser.add_argument("--html", type=str, nargs="?", const="report.html", default="report.html", metavar="FILE", help="Export standalone interactive HTML dashboard report (default: report.html)")
+    parser.add_argument("--no-html", action="store_true", help="Explicitly disable default HTML dashboard export")
     parser.add_argument("--markdown", type=str, metavar="FILE", help="Export GitHub-flavored Markdown summary report")
     parser.add_argument("--open", action="store_true", help="Auto-open exported HTML report in default browser")
     parser.add_argument("--json", type=str, metavar="FILE", help="Export results to a JSON file")
@@ -2733,6 +2775,12 @@ def run_benchmark() -> int:
     parser.add_argument("--debug", action="store_true", help="Enable debug logs for troubleshooting")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}", help="Show version and exit")
     args = parser.parse_args()
+
+    if getattr(args, "no_html", False):
+        args.html = None
+
+    if args.json_stdout:
+        args.quiet = True
 
     if args.no_color or args.json_stdout:
         C.disable()

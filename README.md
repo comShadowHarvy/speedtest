@@ -33,7 +33,7 @@ A high-performance, cross-platform CLI tool for network speed benchmarking, dual
     - 🌐 **Global Anycast Reliability**: Google Public DNS (`8.8.8.8` / `8.8.4.4`)
   - Displays dynamic latency benchmarks, rank, and percentage speedup vs. current system resolver.
 - **Hardware & Network Adapter Diagnostics**: Detects active network interface, connection type (Ethernet, Wi-Fi, VPN), NIC Link Speed (e.g., 1.0 Gbps / 2.5 Gbps / 10 Gbps), Wi-Fi SSID, Signal dBm & %, Channel, Frequency Band (2.4/5/6 GHz), and MTU (including `/proc/net/wireless` and macOS `scutil` fallbacks).
-- **Interactive Glassmorphism HTML Dashboard (`--html` + `--open`)**: Self-contained, responsive dashboard with Outfit & JetBrains Mono typography, animated SVG score gauge, directional bufferbloat visualizer, 1-click copy for DNS IPs with toast notifications, client-side JSON export, dark/light mode toggle (saved to `localStorage`), and PDF printing support (100% offline-ready).
+- **Interactive Glassmorphism HTML Dashboard (`report.html` by default, `--open`)**: Self-contained, responsive dashboard with Outfit & JetBrains Mono typography, animated SVG score gauge, directional bufferbloat visualizer, 1-click copy for DNS IPs with toast notifications, client-side JSON export, dark/light mode toggle (saved to `localStorage`), and PDF printing support (100% offline-ready). Generated automatically as `report.html` (disable with `--no-html` or specify custom filename via `--html [FILE]`).
 - **Terminal Sparklines & History (`--history` & `--history-graph`)**: Visualizes historical speed trends directly in the terminal using Unicode sparklines (` ▂▃▅▆▇█`).
 - **SLA Threshold Alerts**: Set minimum download/upload thresholds or max latency limits (`--threshold-dl`, `--threshold-ul`, `--threshold-ping`) for automated monitoring and CI/CD pipelines (exits with code `3` if violated).
 - **Data Export Formats**: Structured JSON, stdout JSON (`--json-stdout`), CSV (with DL/UL latency & jitter columns), GitHub Markdown (`--markdown`), and HTML.
@@ -128,7 +128,8 @@ python3 speedtest.sh [options]
 --timeout SECS          Per-stream transfer timeout in seconds (default: 18)
 -4, --ipv4              Force IPv4 network requests
 -6, --ipv6              Force IPv6 network requests
---html FILE             Export interactive glassmorphism HTML dashboard
+--html [FILE]           Export interactive glassmorphism HTML dashboard (default: report.html)
+--no-html               Explicitly disable HTML report export
 --open                  Auto-open exported HTML report in default browser
 --markdown FILE         Export GitHub-flavored Markdown summary report
 --json FILE             Export structured benchmark data to a JSON file
@@ -153,7 +154,7 @@ python3 speedtest.sh [options]
 
 ### 1. Standard Benchmark with DNS & HTML Dashboard
 ```bash
-./speedtest.sh --runs 3 --dns --html report.html --open
+./speedtest.sh --runs 3 --dns --open
 ```
 
 ### 2. Fast Cloudflare-Only Speed Test
