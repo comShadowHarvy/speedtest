@@ -495,6 +495,46 @@ class TestBrowserPriority(unittest.TestCase):
             self.assertTrue(kwargs.get("start_new_session"))
 
 
+class TestCliDefaults(unittest.TestCase):
+    def test_default_args(self):
+        with patch("sys.argv", ["speedtest.sh"]), \
+             patch("speedtest.run_benchmark_cycle", return_value=0) as mock_cycle, \
+             patch("speedtest.print_banner"):
+            speedtest.run_benchmark()
+            mock_cycle.assert_called_once()
+            args = mock_cycle.call_args[0][0]
+            self.assertEqual(args.html, "report.html")
+            self.assertTrue(args.open)
+
+    def test_no_open_flag(self):
+        with patch("sys.argv", ["speedtest.sh", "--no-open"]), \
+             patch("speedtest.run_benchmark_cycle", return_value=0) as mock_cycle, \
+             patch("speedtest.print_banner"):
+            speedtest.run_benchmark()
+            mock_cycle.assert_called_once()
+            args = mock_cycle.call_args[0][0]
+            self.assertFalse(args.open)
+
+    def test_no_html_flag(self):
+        with patch("sys.argv", ["speedtest.sh", "--no-html"]), \
+             patch("speedtest.run_benchmark_cycle", return_value=0) as mock_cycle, \
+             patch("speedtest.print_banner"):
+            speedtest.run_benchmark()
+            mock_cycle.assert_called_once()
+            args = mock_cycle.call_args[0][0]
+            self.assertIsNone(args.html)
+
+    def test_json_stdout_disables_open(self):
+        with patch("sys.argv", ["speedtest.sh", "--json-stdout"]), \
+             patch("speedtest.run_benchmark_cycle", return_value=0) as mock_cycle:
+            speedtest.run_benchmark()
+            mock_cycle.assert_called_once()
+            args = mock_cycle.call_args[0][0]
+            self.assertFalse(args.open)
+            self.assertTrue(args.quiet)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

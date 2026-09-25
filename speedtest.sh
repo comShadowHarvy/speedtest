@@ -2803,7 +2803,7 @@ def run_benchmark() -> int:
     parser = argparse.ArgumentParser(
         description=f"Network Speed & Diagnostic Benchmark Tool v{VERSION} by Shadowharvy",
         epilog="Examples:\n"
-               "  speedtest.sh -n 3 --dns --open\n"
+               "  speedtest.sh -n 3 --dns\n"
                "  speedtest.sh --engine cloudflare --threshold-dl 100\n"
                "  speedtest.sh --history --history-graph\n"
                "  speedtest.sh --json-stdout | jq .",
@@ -2823,7 +2823,8 @@ def run_benchmark() -> int:
     parser.add_argument("--html", type=str, nargs="?", const="report.html", default="report.html", metavar="FILE", help="Export standalone interactive HTML dashboard report (default: report.html)")
     parser.add_argument("--no-html", action="store_true", help="Explicitly disable default HTML dashboard export")
     parser.add_argument("--markdown", type=str, metavar="FILE", help="Export GitHub-flavored Markdown summary report")
-    parser.add_argument("--open", action="store_true", help="Auto-open exported HTML report in Firefox, Brave, Chrome, or default browser")
+    parser.add_argument("--open", action="store_true", default=True, help="Auto-open exported HTML report in browser after test (default: enabled)")
+    parser.add_argument("--no-open", action="store_true", help="Explicitly disable auto-opening HTML report in browser after test")
     parser.add_argument("--open-only", action="store_true", help="Open existing HTML report in preferred browser and exit without running benchmark")
     parser.add_argument("--json", type=str, metavar="FILE", help="Export results to a JSON file")
     parser.add_argument("--json-stdout", action="store_true", help="Output machine-readable JSON directly to stdout")
@@ -2840,6 +2841,9 @@ def run_benchmark() -> int:
 
     if getattr(args, "no_html", False):
         args.html = None
+
+    if getattr(args, "no_open", False) or args.json_stdout or args.monitor:
+        args.open = False
 
     if args.json_stdout:
         args.quiet = True
