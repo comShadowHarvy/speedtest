@@ -706,6 +706,42 @@ class TestReportsExport(unittest.TestCase):
             if os.path.exists(tf_path):
                 os.unlink(tf_path)
 
+    def _export_both_with_missing_sections(self, data):
+        results = []
+        for suffix, fn in ((".md", speedtest.export_markdown_report), (".html", speedtest.export_html_report)):
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tf:
+                path = tf.name
+            try:
+                with patch("speedtest.HISTORY_FILE", "/nonexistent/history.json"):
+                    results.append((fn(path, data), path))
+            finally:
+                pass
+        return results
+
+    def test_exports_handle_null_dns_recommendation(self):
+        # --no-dns stores dns_recommendation as None; exporters must not crash.
+        data = json.loads(json.dumps(self.test_data))
+        data["dns_recommendation"] = None
+        for ok, path in self._export_both_with_missing_sections(data):
+            self.assertTrue(ok, f"export failed for {path}")
+            with open(path, "r") as f:
+                content = f.read()
+            # HTML omits the DNS section entirely; Markdown states it was skipped.
+            if path.endswith(".html"):
+                self.assertNotIn("DNS Resolution Leaderboard", content)
+            else:
+                self.assertIn("DNS resolution benchmarking skipped", content)
+            os.unlink(path)
+
+    def test_exports_handle_null_top_level_sections(self):
+        data = json.loads(json.dumps(self.test_data))
+        for key in ("network", "statistics", "suitability", "dns_recommendation"):
+            data[key] = None
+        data["network"] = {"geo": None, "adapter": None}
+        for ok, path in self._export_both_with_missing_sections(data):
+            self.assertTrue(ok, f"export failed for {path}")
+            os.unlink(path)
+
     def test_export_json_report(self):
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
             tf_path = tf.name

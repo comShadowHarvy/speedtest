@@ -1649,13 +1649,14 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
     try:
         ts = html.escape(str(export_data.get("timestamp", "")).replace("T", " ")[:19])
         ver = html.escape(str(export_data.get("version", VERSION)))
-        net = export_data.get("network", {})
-        geo = net.get("geo", {})
-        adapter = net.get("adapter", {})
-        stats = export_data.get("statistics", {})
-        suitability = export_data.get("suitability", {})
-        dns_rec = export_data.get("dns_recommendation", {})
-        dns_data = export_data.get("dns", {})
+        net = export_data.get("network") or {}
+        geo = net.get("geo") or {}
+        adapter = net.get("adapter") or {}
+        stats = export_data.get("statistics") or {}
+        suitability = export_data.get("suitability") or {}
+        # dns_recommendation is None when DNS testing is skipped/failed.
+        dns_rec = export_data.get("dns_recommendation") or {}
+        dns_data = export_data.get("dns") or {}
 
         st_dl = stats.get("speedtest_download_mbps", {}).get("avg", 0.0)
         fast_dl = stats.get("fast_download_mbps", {}).get("avg", 0.0)
@@ -2233,12 +2234,12 @@ def export_markdown_report(filepath: str, export_data: Dict[str, Any], debug: bo
             os.makedirs(dir_name, exist_ok=True)
         ts = str(export_data.get("timestamp", "")).replace("T", " ")[:19]
         ver = md_escape(export_data.get("version", VERSION))
-        net = export_data.get("network", {})
-        geo = net.get("geo", {})
-        adapter = net.get("adapter", {})
-        stats = export_data.get("statistics", {})
-        suitability = export_data.get("suitability", {})
-        dns_rec = export_data.get("dns_recommendation", {})
+        net = export_data.get("network") or {}
+        geo = net.get("geo") or {}
+        adapter = net.get("adapter") or {}
+        stats = export_data.get("statistics") or {}
+        suitability = export_data.get("suitability") or {}
+        dns_rec = export_data.get("dns_recommendation") or {}
 
         m_isp = md_escape(geo.get("isp", "Unknown"))
         m_ip = md_escape(geo.get("ip", "N/A"))
