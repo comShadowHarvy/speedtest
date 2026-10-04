@@ -248,13 +248,34 @@ def is_ipv6_available() -> bool:
         return False
 
 
-def build_dns_query(hostname: str, query_type: str = "A") -> bytes:
-    """Build a standard DNS query packet (Type A or AAAA)."""
-    header = b"\xaa\xbb\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+def build_dns_query(hostname: str, query_type: str = "A", txid: Optional[bytes] = None) -> bytes:
+    """Build a standard DNS query packet (Type A or AAAA).
+
+    A random transaction ID is generated per query unless one is supplied, so
+    replies can be matched to this specific query (RFC 1035 §4.1.1).
+    """
+    if txid is None:
+        txid = os.urandom(2)
+    header = txid + b"\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
     qname = b"".join(bytes([len(part)]) + part.encode("ascii") for part in hostname.split(".")) + b"\x00"
     qtype = b"\x00\x1c" if query_type.upper() == "AAAA" else b"\x00\x01"  # Type AAAA (28) or A (1)
     qclass = b"\x00\x01"  # Class IN
     return header + qname + qtype + qclass
+
+
+def is_valid_dns_response(data: bytes, txid: bytes) -> bool:
+    """Check that a datagram is a successful DNS reply to the query with id `txid`.
+
+    Rejects replies whose transaction ID does not match (stale/off-path packets),
+    that are not responses (QR bit clear), or that carry a non-zero RCODE
+    (SERVFAIL/REFUSED/NXDOMAIN must not be scored as resolver latency).
+    """
+    if len(data) < 12 or data[:2] != txid:
+        return False
+    flags = int.from_bytes(data[2:4], "big")
+    if not (flags & 0x8000):  # QR: response bit
+        return False
+    return (flags & 0x000F) == 0  # RCODE == NOERROR
 
 
 def get_dns_latency(resolver: Dict[str, Any], hostname: str, timeout: int = DNS_TIMEOUT, debug: bool = False) -> Optional[float]:
@@ -265,6 +286,7 @@ def get_dns_latency(resolver: Dict[str, Any], hostname: str, timeout: int = DNS_
         is_ipv6 = ":" in ip
         query_type = "AAAA" if is_ipv6 else "A"
         query_packet = build_dns_query(hostname, query_type)
+        txid = query_packet[:2]
 
         sock_family = socket.AF_INET6 if is_ipv6 else socket.AF_INET
         s = socket.socket(sock_family, socket.SOCK_DGRAM)
@@ -274,8 +296,11 @@ def get_dns_latency(resolver: Dict[str, Any], hostname: str, timeout: int = DNS_
             s.sendto(query_packet, (ip, port))
             data, _ = s.recvfrom(512)
             elapsed = (time.perf_counter() - start) * 1000
-            if len(data) >= 12:
-                return round(elapsed, 2)
+            if not is_valid_dns_response(data, txid):
+                if debug:
+                    print(f"{C.YELLOW}[DEBUG] Ignoring invalid/stale DNS reply from {resolver.get('name', ip)} ({ip}) for {hostname}{C.RESET}")
+                return None
+            return round(elapsed, 2)
         finally:
             s.close()
     except (socket.timeout, socket.gaierror, OSError) as e:

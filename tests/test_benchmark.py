@@ -177,17 +177,19 @@ class TestSparkline(unittest.TestCase):
 
 class TestDNSQueryBuilder(unittest.TestCase):
     def test_dns_packet_structure_a(self):
-        packet = speedtest.build_dns_query("google.com", "A")
+        packet = speedtest.build_dns_query("google.com", "A", txid=b"\xaa\xbb")
         self.assertTrue(len(packet) > 12)
         # Header ID
         self.assertEqual(packet[:2], b"\xaa\xbb")
+        # Recursion desired flag set
+        self.assertEqual(packet[2:4], b"\x01\x00")
         # Contains google and com length bytes
         self.assertIn(b"\x06google\x03com\x00", packet)
         # Type A suffix
         self.assertTrue(packet.endswith(b"\x00\x01\x00\x01"))
 
     def test_dns_packet_structure_aaaa(self):
-        packet = speedtest.build_dns_query("cloudflare.com", "AAAA")
+        packet = speedtest.build_dns_query("cloudflare.com", "AAAA", txid=b"\xaa\xbb")
         self.assertTrue(len(packet) > 12)
         self.assertEqual(packet[:2], b"\xaa\xbb")
         # Type AAAA (28 = 0x001c)
@@ -196,6 +198,55 @@ class TestDNSQueryBuilder(unittest.TestCase):
     def test_dns_subdomains(self):
         packet = speedtest.build_dns_query("sub.domain.example.com", "A")
         self.assertIn(b"\x03sub\x06domain\x07example\x03com\x00", packet)
+
+    def test_random_transaction_id_per_query(self):
+        ids = {speedtest.build_dns_query("example.com", "A")[:2] for _ in range(20)}
+        self.assertGreater(len(ids), 1, "transaction IDs must not be fixed")
+
+
+class TestDNSResponseValidation(unittest.TestCase):
+    def _reply(self, txid=b"\x12\x34", flags=0x8180, body=b"", ancount=1):
+        return txid + flags.to_bytes(2, "big") + b"\x00\x01" + ancount.to_bytes(2, "big") + b"\x00\x00\x00\x00" + body
+
+    def test_accepts_matching_noerror_response(self):
+        self.assertTrue(speedtest.is_valid_dns_response(self._reply(), b"\x12\x34"))
+
+    def test_rejects_mismatched_transaction_id(self):
+        self.assertFalse(speedtest.is_valid_dns_response(self._reply(txid=b"\x99\x99"), b"\x12\x34"))
+
+    def test_rejects_query_packet_echo(self):
+        # QR bit clear -> it is a query, not a response
+        query = speedtest.build_dns_query("example.com", "A", txid=b"\x12\x34")
+        self.assertFalse(speedtest.is_valid_dns_response(query, b"\x12\x34"))
+
+    def test_rejects_error_rcodes(self):
+        for rcode in (1, 2, 3, 5):  # FORMERR, SERVFAIL, NXDOMAIN, REFUSED
+            flags = 0x8180 | rcode
+            self.assertFalse(speedtest.is_valid_dns_response(self._reply(flags=flags), b"\x12\x34"))
+
+    def test_rejects_short_datagram(self):
+        self.assertFalse(speedtest.is_valid_dns_response(b"\x12\x34\x81", b"\x12\x34"))
+
+    def test_get_dns_latency_ignores_stale_reply(self):
+        stale = self._reply(txid=b"\x00\x00")
+        sock = MagicMock()
+        sock.recvfrom.return_value = (stale, ("1.1.1.1", 53))
+        with patch("socket.socket", return_value=sock):
+            result = speedtest.get_dns_latency({"name": "CF", "ip": "1.1.1.1"}, "example.com")
+        self.assertIsNone(result)
+        sock.close.assert_called_once()
+
+    def test_get_dns_latency_accepts_valid_reply(self):
+        sock = MagicMock()
+        # Echo back the transaction ID of the query that was actually sent.
+        def echo(query, addr):
+            sock.recvfrom.return_value = (speedtest.build_dns_query("example.com", "A", txid=query[:2])[:2] + b"\x81\x80\x00\x01\x00\x01\x00\x00\x00\x00", addr)
+            return MagicMock()
+        sock.sendto.side_effect = echo
+        with patch("socket.socket", return_value=sock):
+            result = speedtest.get_dns_latency({"name": "CF", "ip": "1.1.1.1"}, "example.com")
+        self.assertIsNotNone(result)
+        self.assertGreaterEqual(result, 0.0)
 
 
 class TestFastestDNSRecommendation(unittest.TestCase):
