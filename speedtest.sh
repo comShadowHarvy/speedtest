@@ -18,6 +18,7 @@ Features: Multi-Engine Speed Testing (Ookla, Fast.com, Cloudflare, Custom), Adap
 
 import argparse
 import csv
+import html
 import json
 import os
 import re
@@ -47,6 +48,7 @@ DNS_TIMEOUT = 3
 DEFAULT_WORKERS = 4
 
 HISTORY_FILE = os.path.expanduser("~/.speedtest_history.json")
+MAX_HISTORY_ENTRIES = 500
 
 # Public DNS Resolver Configurations (IPv4)
 DNS_RESOLVERS = [
@@ -1546,18 +1548,36 @@ def calculate_statistics(values: List[float]) -> Dict[str, float]:
 
 
 def save_history_record(record_data: Dict[str, Any], debug: bool = False) -> None:
-    """Append a benchmark record to ~/.speedtest_history.json."""
+    """Append a benchmark record to ~/.speedtest_history.json with retention cap and atomic write."""
     try:
         history = []
         if os.path.exists(HISTORY_FILE):
             try:
                 with open(HISTORY_FILE, "r") as f:
-                    history = json.load(f)
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        history = data
             except Exception:
                 history = []
         history.append(record_data)
-        with open(HISTORY_FILE, "w") as f:
-            json.dump(history, f, indent=2)
+        if len(history) > MAX_HISTORY_ENTRIES:
+            history = history[-MAX_HISTORY_ENTRIES:]
+
+        dir_name = os.path.dirname(os.path.abspath(HISTORY_FILE))
+        os.makedirs(dir_name, exist_ok=True)
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile("w", dir=dir_name, delete=False, suffix=".tmp") as tf:
+                json.dump(history, tf, indent=2)
+                temp_path = tf.name
+            os.replace(temp_path, HISTORY_FILE)
+        except Exception:
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except Exception:
+                    pass
+            raise
     except Exception as e:
         if debug:
             print(f"{C.YELLOW}[DEBUG] Failed to save history: {e}{C.RESET}")
@@ -1566,8 +1586,8 @@ def save_history_record(record_data: Dict[str, Any], debug: bool = False) -> Non
 def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool = False) -> bool:
     """Generates a state-of-the-art, interactive glassmorphism standalone HTML report dashboard."""
     try:
-        ts = export_data.get("timestamp", "").replace("T", " ")[:19]
-        ver = export_data.get("version", VERSION)
+        ts = html.escape(str(export_data.get("timestamp", "")).replace("T", " ")[:19])
+        ver = html.escape(str(export_data.get("version", VERSION)))
         net = export_data.get("network", {})
         geo = net.get("geo", {})
         adapter = net.get("adapter", {})
@@ -1607,7 +1627,7 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
 
         history_rows = ""
         for h in recent_history:
-            h_ts = h.get("timestamp", "").replace("T", " ")[:16]
+            h_ts = html.escape(str(h.get("timestamp", "")).replace("T", " ")[:16])
             h_stats = h.get("statistics", {})
             h_dl = max(
                 h_stats.get("speedtest_download_mbps", {}).get("avg", 0.0),
@@ -1616,9 +1636,19 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
                 h_stats.get("custom_download_mbps", {}).get("avg", 0.0)
             )
             h_ping = h_stats.get("ping_ms", {}).get("avg", 0.0)
-            h_bb = h_stats.get("bufferbloat", {}).get("grade", "N/A")
-            h_score = h.get("suitability", {}).get("overall_score", "N/A")
+            h_bb = html.escape(str(h_stats.get("bufferbloat", {}).get("grade", "N/A")))
+            h_score = html.escape(str(h.get("suitability", {}).get("overall_score", "N/A")))
             history_rows += f"<tr><td>{h_ts}</td><td><strong>{h_dl:.1f} Mbps</strong></td><td>{h_ping:.1f} ms</td><td><span class='badge'>{h_bb}</span></td><td><strong>{h_score}/100</strong></td></tr>"
+
+        dns_rows = ""
+        for item in dns_rec.get("leaderboard", []):
+            rank = item.get("rank", 1)
+            rank_display = "🥇 1" if rank == 1 else ("🥈 2" if rank == 2 else ("🥉 3" if rank == 3 else f"#{rank}"))
+            d_name = html.escape(str(item.get("name", "")))
+            d_ip = html.escape(str(item.get("ip", "")))
+            d_cat = html.escape(str(item.get("category", "")))
+            d_lat = item.get("latency_ms", 0.0)
+            dns_rows += f"<tr><td><strong>{rank_display}</strong></td><td><strong>{d_name}</strong></td><td><code class='font-mono'>{d_ip}</code><button class='copy-ip-btn' onclick='copyText(\"{d_ip}\")'>📋</button></td><td style='color:var(--accent-green)'><strong>{d_lat:.2f} ms</strong></td><td><span class='badge'>{d_cat}</span></td></tr>"
 
         score_color = "#10b981" if score >= 85 else ("#06b6d4" if score >= 70 else ("#f59e0b" if score >= 50 else "#ef4444"))
         score_circumference = 314.16
@@ -1872,7 +1902,7 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
         <div class="header">
             <div class="header-title">
                 <h1>Network Benchmark Report</h1>
-                <p>Generated: <strong>{ts}</strong> | Tool: <strong>v{ver}</strong> | Host ISP: <strong>{geo.get("isp", "Local Network")}</strong></p>
+                <p>Generated: <strong>{ts}</strong> | Tool: <strong>v{ver}</strong> | Host ISP: <strong>{html.escape(str(geo.get("isp", "Local Network")))}</strong></p>
             </div>
             <div class="header-controls">
                 <button class="btn" onclick="toggleTheme()">🌓 Theme</button>
@@ -1929,15 +1959,15 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
             <!-- Card 3: Network Adapter & Infrastructure -->
             <div class="card">
                 <div class="card-title">Network & Hardware Diagnostics</div>
-                <div class="info-row"><span class="info-label">Public WAN IP:</span><span class="info-val font-mono">{geo.get("ip", "N/A")}</span></div>
-                {f'<div class="info-row"><span class="info-label">Public IPv6:</span><span class="info-val font-mono">{geo.get("ipv6")}</span></div>' if geo.get("ipv6") and geo.get("ipv6") != "Unavailable" else ''}
-                <div class="info-row"><span class="info-label">ISP & Location:</span><span class="info-val">{geo.get("isp", "Unknown")} ({geo.get("city", "")}, {geo.get("country", "")})</span></div>
-                <div class="info-row"><span class="info-label">Interface:</span><span class="info-val font-mono">{adapter.get("interface", "Unknown")} ({adapter.get("interface_type", "Ethernet")})</span></div>
-                <div class="info-row"><span class="info-label">Hardware Link Speed:</span><span class="info-val" style="color:var(--accent-green)">{adapter.get("link_speed", "N/A")}</span></div>
-                {f'<div class="info-row"><span class="info-label">Wi-Fi Network:</span><span class="info-val">{adapter.get("wifi_ssid")} ({adapter.get("wifi_signal")})</span></div>' if adapter.get("wifi_ssid") not in ("N/A (Wired/Unknown)", "N/A") else ''}
-                {f'<div class="info-row"><span class="info-label">Wi-Fi Band:</span><span class="info-val">{adapter.get("wifi_frequency")}</span></div>' if adapter.get("wifi_frequency") not in ("N/A", "") else ''}
-                <div class="info-row"><span class="info-label">Local Gateway IP:</span><span class="info-val font-mono">{adapter.get("gateway", "N/A")}</span></div>
-                <div class="info-row"><span class="info-label">Interface MTU:</span><span class="info-val font-mono">{adapter.get("mtu", "1500")}</span></div>
+                <div class="info-row"><span class="info-label">Public WAN IP:</span><span class="info-val font-mono">{html.escape(str(geo.get("ip", "N/A")))}</span></div>
+                {f'<div class="info-row"><span class="info-label">Public IPv6:</span><span class="info-val font-mono">{html.escape(str(geo.get("ipv6")))}</span></div>' if geo.get("ipv6") and geo.get("ipv6") != "Unavailable" else ''}
+                <div class="info-row"><span class="info-label">ISP & Location:</span><span class="info-val">{html.escape(str(geo.get("isp", "Unknown")))} ({html.escape(str(geo.get("city", "")))}, {html.escape(str(geo.get("country", "")))})</span></div>
+                <div class="info-row"><span class="info-label">Interface:</span><span class="info-val font-mono">{html.escape(str(adapter.get("interface", "Unknown")))} ({html.escape(str(adapter.get("interface_type", "Ethernet")))})</span></div>
+                <div class="info-row"><span class="info-label">Hardware Link Speed:</span><span class="info-val" style="color:var(--accent-green)">{html.escape(str(adapter.get("link_speed", "N/A")))}</span></div>
+                {f'<div class="info-row"><span class="info-label">Wi-Fi Network:</span><span class="info-val">{html.escape(str(adapter.get("wifi_ssid")))} ({html.escape(str(adapter.get("wifi_signal")))})</span></div>' if adapter.get("wifi_ssid") not in ("N/A (Wired/Unknown)", "N/A") else ''}
+                {f'<div class="info-row"><span class="info-label">Wi-Fi Band:</span><span class="info-val">{html.escape(str(adapter.get("wifi_frequency")))}</span></div>' if adapter.get("wifi_frequency") not in ("N/A", "") else ''}
+                <div class="info-row"><span class="info-label">Local Gateway IP:</span><span class="info-val font-mono">{html.escape(str(adapter.get("gateway", "N/A")))}</span></div>
+                <div class="info-row"><span class="info-label">Interface MTU:</span><span class="info-val font-mono">{html.escape(str(adapter.get("mtu", "1500")))}</span></div>
             </div>
         </div>
 
@@ -1985,16 +2015,14 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
                 <thead>
                     <tr><th>Rank</th><th>Resolver Name</th><th>IP Address</th><th>Avg Latency</th><th>Category / Best For</th></tr>
                 </thead>
-                <tbody>
-                    {''.join([f"<tr><td><strong>{'🥇 1' if item['rank']==1 else ('🥈 2' if item['rank']==2 else ('🥉 3' if item['rank']==3 else f'#{item['rank']}'))}</strong></td><td><strong>{item['name']}</strong></td><td><code class='font-mono'>{item['ip']}</code><button class='copy-ip-btn' onclick='copyText(\"{item['ip']}\")'>📋</button></td><td style='color:var(--accent-green)'><strong>{item['latency_ms']:.2f} ms</strong></td><td><span class='badge'>{item['category']}</span></td></tr>" for item in dns_rec.get("leaderboard", [])])}
-                </tbody>
+                <tbody>{dns_rows}</tbody>
             </table>
 
             <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.35); border-radius: 16px; padding: 20px; margin-top: 24px;">
                 <div style="font-weight: 800; font-size: 16px; margin-bottom: 8px; color: var(--accent-purple);">
                     🏆 Recommended DNS Configurations for Your Network
                 </div>
-                <p style="margin: 0 0 16px 0; color: var(--text-dim); font-size: 14px;">{dns_rec.get("status_message")}</p>
+                <p style="margin: 0 0 16px 0; color: var(--text-dim); font-size: 14px;">{html.escape(str(dns_rec.get("status_message", "")))}</p>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px;">
                     <div style="background: var(--card-bg); border: 1px solid rgba(139, 92, 246, 0.4); padding: 16px; border-radius: 12px;">
                         <strong style="color:var(--accent-purple)">🚀 Best for Speed & Privacy</strong><br>
@@ -2196,6 +2224,52 @@ def export_markdown_report(filepath: str, export_data: Dict[str, Any], debug: bo
     except Exception as e:
         if debug:
             print(f"{C.YELLOW}[DEBUG] Failed to write Markdown report: {e}{C.RESET}")
+        return False
+
+
+def export_json_report(filepath: str, export_data: Dict[str, Any], debug: bool = False) -> bool:
+    """Exports structured benchmark results to a formatted JSON file."""
+    try:
+        dir_name = os.path.dirname(os.path.abspath(filepath))
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+        with open(filepath, "w") as f:
+            json.dump(export_data, f, indent=4)
+        return True
+    except Exception as e:
+        if debug:
+            print(f"{C.YELLOW}[DEBUG] Failed to write JSON report: {e}{C.RESET}")
+        return False
+
+
+def export_csv_report(
+    filepath: str,
+    st_results: List[Dict[str, Any]],
+    fast_results: List[Dict[str, Any]],
+    cf_results: List[Dict[str, Any]],
+    custom_results: List[Dict[str, Any]],
+    debug: bool = False
+) -> bool:
+    """Exports raw per-iteration speed benchmark measurements to a CSV file."""
+    try:
+        dir_name = os.path.dirname(os.path.abspath(filepath))
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+        with open(filepath, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Engine", "Run", "Download (Mbps)", "Upload (Mbps)", "Ping (ms)", "Jitter (ms)", "DL_Latency (ms)", "UL_Latency (ms)"])
+            for idx, r in enumerate(st_results):
+                writer.writerow(["Speedtest", idx + 1, r.get("download", ""), r.get("upload", ""), r.get("ping", ""), r.get("jitter", ""), r.get("dl_latency", ""), r.get("ul_latency", "")])
+            for idx, r in enumerate(fast_results):
+                writer.writerow(["Fast.com", idx + 1, r.get("download", ""), "", "", "", "", ""])
+            for idx, r in enumerate(cf_results):
+                writer.writerow(["Cloudflare", idx + 1, r.get("download", ""), r.get("upload", ""), "", "", "", ""])
+            for idx, r in enumerate(custom_results):
+                writer.writerow(["Custom", idx + 1, r.get("download", ""), "", "", "", "", ""])
+        return True
+    except Exception as e:
+        if debug:
+            print(f"{C.YELLOW}[DEBUG] Failed to write CSV report: {e}{C.RESET}")
         return False
 
 
@@ -2731,32 +2805,19 @@ def run_benchmark_cycle(args) -> int:
 
     # File exports
     if args.json:
-        try:
-            with open(args.json, "w") as f:
-                json.dump(export_data, f, indent=4)
+        if export_json_report(args.json, export_data, args.debug):
             if not args.quiet:
                 print(f"{C.GREEN}[✔] JSON data exported to {args.json}{C.RESET}")
-        except Exception as e:
-            print(f"{C.RED}[!] Failed to write JSON: {e}{C.RESET}")
+        else:
+            print(f"{C.RED}[!] Failed to write JSON: {args.json}{C.RESET}")
             exit_code = 1
 
     if args.csv:
-        try:
-            with open(args.csv, "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["Engine", "Run", "Download (Mbps)", "Upload (Mbps)", "Ping (ms)", "Jitter (ms)", "DL_Latency (ms)", "UL_Latency (ms)"])
-                for idx, r in enumerate(st_results):
-                    writer.writerow(["Speedtest", idx + 1, r.get("download", ""), r.get("upload", ""), r.get("ping", ""), r.get("jitter", ""), r.get("dl_latency", ""), r.get("ul_latency", "")])
-                for idx, r in enumerate(fast_results):
-                    writer.writerow(["Fast.com", idx + 1, r.get("download", ""), "", "", "", "", ""])
-                for idx, r in enumerate(cf_results):
-                    writer.writerow(["Cloudflare", idx + 1, r.get("download", ""), r.get("upload", ""), "", "", "", ""])
-                for idx, r in enumerate(custom_results):
-                    writer.writerow(["Custom", idx + 1, r.get("download", ""), "", "", "", "", ""])
+        if export_csv_report(args.csv, st_results, fast_results, cf_results, custom_results, args.debug):
             if not args.quiet:
                 print(f"{C.GREEN}[✔] CSV data exported to {args.csv}{C.RESET}")
-        except Exception as e:
-            print(f"{C.RED}[!] Failed to write CSV: {e}{C.RESET}")
+        else:
+            print(f"{C.RED}[!] Failed to write CSV: {args.csv}{C.RESET}")
             exit_code = 1
 
     if getattr(args, "markdown", None):
@@ -2810,21 +2871,33 @@ def run_benchmark() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("-n", "--runs", type=int, default=3, help="Number of benchmark iterations (default: 3, max: 20)")
-    parser.add_argument("--dns", action="store_true", default=True, help="Run background DNS & DoH resolution tests (default: enabled)")
-    parser.add_argument("--no-dns", action="store_true", help="Explicitly disable DNS & DoH resolution tests")
+
+    dns_group = parser.add_mutually_exclusive_group()
+    dns_group.add_argument("--dns", action="store_true", default=True, help="Run background DNS & DoH resolution tests (default: enabled)")
+    dns_group.add_argument("--no-dns", action="store_true", help="Explicitly disable DNS & DoH resolution tests")
+
     parser.add_argument("--engine", type=str, choices=["all", "speedtest", "ookla", "fast", "cloudflare", "custom"], default="all", help="Select speed engine filter (default: all)")
     parser.add_argument("--server", type=str, metavar="URL", help="Custom HTTP/HTTPS speedtest download URL to benchmark")
     parser.add_argument("--timeout", type=int, default=DOWNLOAD_TIMEOUT, metavar="SECS", help=f"Per-stream transfer timeout in seconds (default: {DOWNLOAD_TIMEOUT})")
-    parser.add_argument("-4", "--ipv4", action="store_true", help="Force IPv4 network requests")
-    parser.add_argument("-6", "--ipv6", action="store_true", help="Force IPv6 network requests")
+
+    ip_group = parser.add_mutually_exclusive_group()
+    ip_group.add_argument("-4", "--ipv4", action="store_true", help="Force IPv4 network requests")
+    ip_group.add_argument("-6", "--ipv6", action="store_true", help="Force IPv6 network requests")
+
     parser.add_argument("--history", action="store_true", help="Display historical benchmark trends and averages")
     parser.add_argument("--history-graph", action="store_true", help="Render sparkline trend graph with history")
     parser.add_argument("--history-clear", action="store_true", help="Clear historical benchmark log file")
-    parser.add_argument("--html", type=str, nargs="?", const="report.html", default="report.html", metavar="FILE", help="Export standalone interactive HTML dashboard report (default: report.html)")
-    parser.add_argument("--no-html", action="store_true", help="Explicitly disable default HTML dashboard export")
+
+    html_group = parser.add_mutually_exclusive_group()
+    html_group.add_argument("--html", type=str, nargs="?", const="report.html", default="report.html", metavar="FILE", help="Export standalone interactive HTML dashboard report (default: report.html)")
+    html_group.add_argument("--no-html", action="store_true", help="Explicitly disable default HTML dashboard export")
+
     parser.add_argument("--markdown", type=str, metavar="FILE", help="Export GitHub-flavored Markdown summary report")
-    parser.add_argument("--open", action="store_true", default=True, help="Auto-open exported HTML report in browser after test (default: enabled)")
-    parser.add_argument("--no-open", action="store_true", help="Explicitly disable auto-opening HTML report in browser after test")
+
+    open_group = parser.add_mutually_exclusive_group()
+    open_group.add_argument("--open", action="store_true", default=True, help="Auto-open exported HTML report in browser after test (default: enabled)")
+    open_group.add_argument("--no-open", action="store_true", help="Explicitly disable auto-opening HTML report in browser after test")
+
     parser.add_argument("--open-only", action="store_true", help="Open existing HTML report in preferred browser and exit without running benchmark")
     parser.add_argument("--json", type=str, metavar="FILE", help="Export results to a JSON file")
     parser.add_argument("--json-stdout", action="store_true", help="Output machine-readable JSON directly to stdout")
@@ -2838,6 +2911,9 @@ def run_benchmark() -> int:
     parser.add_argument("--debug", action="store_true", help="Enable debug logs for troubleshooting")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}", help="Show version and exit")
     args = parser.parse_args()
+
+    if getattr(args, "no_dns", False):
+        args.dns = False
 
     if getattr(args, "no_html", False):
         args.html = None
