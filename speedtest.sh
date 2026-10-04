@@ -2859,6 +2859,49 @@ def run_benchmark_cycle(args) -> int:
     return exit_code
 
 
+MAX_RUNS = 20
+MAX_MONITOR_MINUTES = 1440
+
+
+def validate_args(args) -> Optional[str]:
+    """Validate CLI argument combinations/ranges.
+
+    Returns an error message string when the arguments are invalid, otherwise None.
+    Kept separate from run_benchmark() so it can be unit tested directly.
+    """
+    runs = getattr(args, "runs", 3)
+    if runs < 1 or runs > MAX_RUNS:
+        return f"--runs must be between 1 and {MAX_RUNS} (got: {runs})"
+
+    timeout = getattr(args, "timeout", DOWNLOAD_TIMEOUT)
+    if timeout < 1:
+        return f"--timeout must be at least 1 second (got: {timeout})"
+
+    monitor = getattr(args, "monitor", None)
+    if monitor is not None:
+        if monitor < 1:
+            return f"--monitor interval must be at least 1 minute (got: {monitor})"
+        if monitor > MAX_MONITOR_MINUTES:
+            return f"--monitor interval must be at most {MAX_MONITOR_MINUTES} minutes (got: {monitor})"
+
+    engine = getattr(args, "engine", "all")
+    server = getattr(args, "server", None)
+    if engine == "custom" and not server:
+        return "--engine custom requires --server <URL> to point at a downloadable endpoint"
+    if engine not in ("all", "custom") and server:
+        return f"--server is only meaningful with '--engine all' or '--engine custom' (current engine: {engine})"
+
+    for flag, value in (
+        ("--threshold-dl", getattr(args, "threshold_dl", None)),
+        ("--threshold-ul", getattr(args, "threshold_ul", None)),
+        ("--threshold-ping", getattr(args, "threshold_ping", None)),
+    ):
+        if value is not None and value <= 0:
+            return f"{flag} must be greater than 0 (got: {value})"
+
+    return None
+
+
 def run_benchmark() -> int:
     """Main entry point supporting single run, continuous monitoring, and CLI flags."""
     parser = argparse.ArgumentParser(
@@ -2935,8 +2978,9 @@ def run_benchmark() -> int:
     if args.history or args.history_clear:
         return display_history(clear=args.history_clear, no_color=args.no_color, show_graph=True)
 
-    if args.runs < 1 or args.runs > 20:
-        print(f"{C.RED}[!] Error: --runs must be between 1 and 20{C.RESET}")
+    error = validate_args(args)
+    if error:
+        print(f"{C.RED}[!] Error: {error}{C.RESET}")
         return 1
 
     if not args.json_stdout:

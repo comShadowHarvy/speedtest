@@ -1033,5 +1033,48 @@ class TestSlaThresholdsAndExitCodes(unittest.TestCase):
         self.assertEqual(code, 2)
 
 
+class TestValidateArgs(unittest.TestCase):
+    def _args(self, **kwargs):
+        args = MagicMock()
+        args.runs = 3
+        args.timeout = 18
+        args.monitor = None
+        args.engine = "all"
+        args.server = None
+        args.threshold_dl = None
+        args.threshold_ul = None
+        args.threshold_ping = None
+        for k, v in kwargs.items():
+            setattr(args, k, v)
+        return args
+
+    def test_valid_defaults(self):
+        self.assertIsNone(speedtest.validate_args(self._args()))
+
+    def test_runs_out_of_range(self):
+        self.assertIn("--runs", speedtest.validate_args(self._args(runs=0)))
+        self.assertIn("--runs", speedtest.validate_args(self._args(runs=21)))
+
+    def test_invalid_timeout(self):
+        self.assertIn("--timeout", speedtest.validate_args(self._args(timeout=0)))
+
+    def test_invalid_monitor_interval(self):
+        self.assertIn("--monitor", speedtest.validate_args(self._args(monitor=0)))
+        self.assertIn("--monitor", speedtest.validate_args(self._args(monitor=-5)))
+        self.assertIn("--monitor", speedtest.validate_args(self._args(monitor=100000)))
+
+    def test_custom_engine_requires_server(self):
+        self.assertIn("--server", speedtest.validate_args(self._args(engine="custom")))
+        self.assertIsNone(speedtest.validate_args(self._args(engine="custom", server="https://example.com/100MB.bin")))
+
+    def test_server_rejected_for_other_engines(self):
+        self.assertIn("--server", speedtest.validate_args(self._args(engine="fast", server="https://example.com/100MB.bin")))
+
+    def test_non_positive_thresholds(self):
+        self.assertIn("--threshold-dl", speedtest.validate_args(self._args(threshold_dl=0)))
+        self.assertIn("--threshold-ul", speedtest.validate_args(self._args(threshold_ul=-1)))
+        self.assertIn("--threshold-ping", speedtest.validate_args(self._args(threshold_ping=0)))
+
+
 if __name__ == "__main__":
     unittest.main()
