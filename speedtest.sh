@@ -2043,23 +2043,34 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
 
         # Site reachability timing rows (--traceroute). All values are host-provided,
         # so names/hosts/IPs are HTML-escaped and numbers are coerced defensively.
+        # Site reachability tiles with a proportional phase-breakdown bar.
+        # All text is host-provided, so names/hosts/IPs are HTML-escaped and
+        # numeric fields are coerced so malformed data cannot break the report.
         site_timing_rows = ""
         for st in (export_data.get("site_timings") or []):
             st_name = html.escape(str(st.get("name", "?")))
             st_host = html.escape(str(st.get("host", "")))
             if not st.get("reachable"):
-                site_timing_rows += (f"<tr><td><strong>{st_name}</strong></td>"
-                                     f"<td><code class='font-mono'>{st_host}</code></td>"
-                                     f"<td colspan='6'><span class='badge' style='background:rgba(239,68,68,0.2);color:#ef4444'>Unreachable</span></td></tr>")
+                site_timing_rows += (
+                    f"<div class='site-tile down'>"
+                    f"<div class='site-tile-head'><span class='site-name'>{st_name}</span>"
+                    f"<span class='site-total' style='color:var(--accent-red)'>—</span></div>"
+                    f"<div class='site-host'>{st_host}</div>"
+                    f"<div class='site-phases' style='margin-top:8px'>"
+                    f"<span class='badge badge-red'>Unreachable</span></div></div>"
+                )
                 continue
 
-            def _f(key: str) -> float:
+            def _f(key: str, _src: Dict[str, Any] = st) -> float:
                 try:
-                    return float(st.get(key, 0.0) or 0.0)
+                    return max(0.0, float(_src.get(key, 0.0) or 0.0))
                 except (TypeError, ValueError):
                     return 0.0
 
             total = _f("total_ms")
+            dns_v, tcp_v, tls_v, srv_v, ttfb_v = (_f("dns_ms"), _f("tcp_ms"),
+                                                   _f("tls_ms"), _f("server_ms"), _f("ttfb_ms"))
+            dl_v = max(0.0, total - ttfb_v)
             if total <= 0:
                 t_color = "#ef4444"
             elif total < 300:
@@ -2068,38 +2079,72 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
                 t_color = "#f59e0b"
             else:
                 t_color = "#ef4444"
+
+            # Scale bar segments against the total so the bar always fills exactly.
+            denom = total if total > 0 else 1.0
+            seg = ""
+            for css_class, value in (("ph-dns", dns_v), ("ph-tcp", tcp_v),
+                                     ("ph-tls", tls_v), ("ph-srv", srv_v), ("ph-dl", dl_v)):
+                pct = (value / denom) * 100.0
+                if pct <= 0:
+                    continue
+                seg += f"<span class='{css_class}' style='width:{pct:.2f}%'></span>"
+            if not seg:
+                seg = "<span class='ph-dl' style='width:100%'></span>"
+
             st_ip = html.escape(str(st.get("remote_ip", "")))
+            code = int(_f("http_code"))
             site_timing_rows += (
-                f"<tr><td><strong>{st_name}</strong></td>"
-                f"<td><code class='font-mono'>{st_host}</code></td>"
-                f"<td><code class='font-mono'>{st_ip}</code></td>"
-                f"<td>{_f('dns_ms'):.1f} ms</td>"
-                f"<td>{_f('tcp_ms'):.1f} ms</td>"
-                f"<td>{_f('tls_ms'):.1f} ms</td>"
-                f"<td>{_f('server_ms'):.1f} ms</td>"
-                f"<td><strong style='color:{t_color}'>{total:.1f} ms</strong></td>"
-                f"<td><span class='badge'>HTTP {int(_f('http_code'))}</span></td></tr>"
+                f"<div class='site-tile'>"
+                f"<div class='site-tile-head'>"
+                f"<span class='site-name'>{st_name}</span>"
+                f"<span class='site-total' style='color:{t_color}'>{total:.0f} ms</span></div>"
+                f"<div class='site-host'>{st_host} · {st_ip}</div>"
+                f"<div class='phase-bar'>{seg}</div>"
+                f"<div class='site-phases'>"
+                f"<span>DNS <b>{dns_v:.0f}</b></span>"
+                f"<span>TCP <b>{tcp_v:.0f}</b></span>"
+                f"<span>TLS <b>{tls_v:.0f}</b></span>"
+                f"<span>Server <b>{srv_v:.0f}</b></span>"
+                f"<span>TTFB <b>{ttfb_v:.0f}</b></span>"
+                f"<span class='badge'>HTTP {code}</span>"
+                f"</div></div>"
             )
 
         traceroute_blocks = ""
         for tr in (export_data.get("traceroutes") or []):
-            hop_rows = ""
+            items = ""
             for hop in tr.get("hops", []):
                 if hop.get("timeout") or hop.get("rtt_ms") is None:
-                    hop_rows += f"<tr><td>{hop.get('hop')}</td><td><code class='font-mono'>*</code></td><td><span class='badge'>no reply</span></td></tr>"
+                    items += (f"<li class='hop-node dead'>"
+                              f"<span class='hop-dot'></span>"
+                              f"<div class='hop-row'><span class='hop-num'>Hop {hop.get('hop')}</span>"
+                              f"<span class='hop-addr' style='color:var(--text-dim)'>* * * no reply</span></div></li>")
                     continue
-                rtt = float(hop["rtt_ms"])
-                r_color = "#10b981" if rtt < 30 else ("#f59e0b" if rtt < 100 else "#ef4444")
-                hop_rows += (f"<tr><td>{hop.get('hop')}</td>"
-                             f"<td><code class='font-mono'>{html.escape(str(hop.get('ip') or '?'))}</code></td>"
-                             f"<td><strong style='color:{r_color}'>{rtt:.2f} ms</strong></td></tr>")
+                try:
+                    rtt = float(hop["rtt_ms"])
+                except (TypeError, ValueError):
+                    rtt = 0.0
+                if rtt < 30:
+                    cls, r_color = "", "#10b981"
+                elif rtt < 100:
+                    cls, r_color = "warn", "#f59e0b"
+                else:
+                    cls, r_color = "bad", "#ef4444"
+                addr = html.escape(str(hop.get("ip") or "?"))
+                items += (f"<li class='hop-node {cls}'>"
+                          f"<span class='hop-dot'></span>"
+                          f"<div class='hop-row'>"
+                          f"<span class='hop-num'>Hop {hop.get('hop')}</span>"
+                          f"<code class='hop-addr font-mono'>{addr}</code>"
+                          f"<span class='hop-rtt' style='color:{r_color}'>{rtt:.2f} ms</span>"
+                          f"</div></li>")
             traceroute_blocks += (
-                "<div style='margin-top:12px;'>"
-                f"<div style='font-weight:700; margin-bottom:6px; color:var(--accent-purple);'>"
-                f"🧭 Hop-by-Hop Path to {html.escape(str(tr.get('host', '')))} "
-                f"<span class='badge'>{tr.get('responding_hops', 0)}/{tr.get('hop_count', 0)} hops via {html.escape(str(tr.get('tool', '?')))}</span></div>"
-                "<table class='data-table'><thead><tr><th>Hop</th><th>Address</th><th>RTT</th></tr></thead>"
-                f"<tbody>{hop_rows}</tbody></table></div>"
+                f"<div class='hop-wrap'>"
+                f"<div class='hop-title'>🗺️ Hop-by-Hop Path to {html.escape(str(tr.get('host', '')))}"
+                f"<span class='badge badge-purple'>{tr.get('responding_hops', 0)}/{tr.get('hop_count', 0)} hops"
+                f" · {html.escape(str(tr.get('tool', '?')))}</span></div>"
+                f"<ol class='hop-list'>{items}</ol></div>"
             )
 
         score_color = "#10b981" if score >= 85 else ("#06b6d4" if score >= 70 else ("#f59e0b" if score >= 50 else "#ef4444"))
@@ -2325,6 +2370,60 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
         table {{ width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }}
         th, td {{ padding: 11px 12px; text-align: left; border-bottom: 1px solid var(--card-border); }}
         th {{ color: var(--text-dim); text-transform: uppercase; font-size: 11px; letter-spacing: 0.8px; font-weight: 800; }}
+        tbody tr {{ transition: background 0.15s ease; }}
+        tbody tr:nth-child(even) {{ background: rgba(148, 163, 184, 0.045); }}
+        tbody tr:hover {{ background: rgba(6, 182, 212, 0.07); }}
+        th.num, td.num {{ text-align: right; font-variant-numeric: tabular-nums; }}
+
+        /* Site reachability tiles with a proportional phase-breakdown bar */
+        .site-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin-top: 6px; }}
+        .site-tile {{
+            background: var(--chip-bg); border: 1px solid var(--card-border);
+            border-radius: 14px; padding: 14px 15px; transition: border-color .2s ease, transform .2s ease;
+        }}
+        .site-tile:hover {{ border-color: var(--card-hover-border); transform: translateY(-2px); }}
+        .site-tile.down {{ border-color: rgba(239, 68, 68, 0.45); background: rgba(239, 68, 68, 0.07); }}
+        .site-tile-head {{ display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }}
+        .site-name {{ font-weight: 800; font-size: 15px; letter-spacing: -0.2px; }}
+        .site-total {{ font-weight: 900; font-size: 17px; font-variant-numeric: tabular-nums; }}
+        .site-host {{ font-size: 11px; color: var(--text-dim); margin-top: 2px; word-break: break-all; }}
+        .phase-bar {{
+            display: flex; height: 9px; border-radius: 9999px; overflow: hidden;
+            margin: 11px 0 8px; background: var(--gauge-track);
+        }}
+        .phase-bar span {{ display: block; height: 100%; }}
+        .ph-dns {{ background: #38bdf8; }}
+        .ph-tcp {{ background: #10b981; }}
+        .ph-tls {{ background: #a78bfa; }}
+        .ph-srv {{ background: #f59e0b; }}
+        .ph-dl  {{ background: rgba(148, 163, 184, 0.45); }}
+        .site-phases {{ display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: var(--text-dim); }}
+        .site-phases b {{ color: var(--text-main); font-variant-numeric: tabular-nums; }}
+        .legend {{ display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 14px; font-size: 11px; color: var(--text-dim); }}
+        .legend i {{ display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 6px; vertical-align: middle; }}
+
+        /* Hop-by-hop vertical timeline */
+        .hop-wrap {{ margin-top: 18px; }}
+        .hop-title {{ font-weight: 700; font-size: 14px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
+        .hop-list {{ list-style: none; margin: 0; padding: 0 0 0 6px; }}
+        .hop-node {{ position: relative; padding: 0 0 14px 30px; }}
+        .hop-node::before {{
+            content: ''; position: absolute; left: 5px; top: 16px; bottom: -2px;
+            width: 2px; background: linear-gradient(180deg, var(--card-border), transparent);
+        }}
+        .hop-node:last-child::before {{ display: none; }}
+        .hop-dot {{
+            position: absolute; left: 0; top: 5px; width: 12px; height: 12px; border-radius: 50%;
+            background: var(--accent-cyan); border: 2px solid var(--card-bg);
+            box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.25);
+        }}
+        .hop-node.warn .hop-dot {{ background: var(--accent-yellow); box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25); }}
+        .hop-node.bad .hop-dot {{ background: var(--accent-red); box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25); }}
+        .hop-node.dead .hop-dot {{ background: var(--text-dim); box-shadow: none; }}
+        .hop-row {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }}
+        .hop-num {{ font-size: 11px; color: var(--text-dim); font-weight: 700; min-width: 26px; }}
+        .hop-addr {{ font-size: 13px; font-weight: 600; word-break: break-all; }}
+        .hop-rtt {{ margin-left: auto; font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }}
         .copy-ip-btn {{
             background: none;
             border: none;
@@ -2478,12 +2577,14 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
         <!-- Site Reachability Timing (--traceroute) -->
         <div class="card" style="margin-bottom: 26px;">
             <div class="card-title">🧭 Site Reachability Timing (Traceroute-Style)</div>
-            <table>
-                <thead>
-                    <tr><th>Site</th><th>Host</th><th>Edge IP</th><th>DNS</th><th>TCP</th><th>TLS</th><th>Server</th><th>Total</th><th>Status</th></tr>
-                </thead>
-                <tbody>{site_timing_rows}</tbody>
-            </table>
+            <div class="site-grid">{site_timing_rows}</div>
+            <div class="legend">
+                <span><i class="ph-dns"></i>DNS</span>
+                <span><i class="ph-tcp"></i>TCP connect</span>
+                <span><i class="ph-tls"></i>TLS handshake</span>
+                <span><i class="ph-srv"></i>Server think</span>
+                <span><i class="ph-dl"></i>Content transfer</span>
+            </div>
             {traceroute_blocks}
         </div>
         ''' if site_timing_rows else ''}

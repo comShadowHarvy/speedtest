@@ -1702,11 +1702,14 @@ class TestTraceReportIntegration(unittest.TestCase):
                 content = f.read()
             self.assertIn("Site Reachability Timing", content)
             self.assertIn("www.youtube.com", content)
-            self.assertIn("534.3 ms", content)
+            self.assertIn("534 ms", content)          # rounded headline
             self.assertIn("Unreachable", content)
             self.assertIn("Hop-by-Hop Path", content)
             self.assertIn("192.168.1.1", content)
             self.assertIn("no reply", content)
+            # Phase-breakdown bar + legend are present for visual scanning.
+            for marker in ("phase-bar", "site-grid", "legend", "hop-list", "hop-dot"):
+                self.assertIn(marker, content)
 
     def test_html_report_omits_section_without_data(self):
         data = self._data()
