@@ -1145,6 +1145,14 @@ def get_lan_ip(family: str = "4", debug: bool = False) -> str:
         return "Unavailable"
 
 
+GEO_PROVIDERS = (
+    # (url, ip_version) - HTTPS providers first: plain HTTP to a geo endpoint leaks
+    # the user's WAN IP in cleartext to the network/ISP.
+    ("https://ipwho.is/", None),
+    ("http://ip-api.com/json/?fields=status,message,country,countryCode,regionName,city,isp,org,as,query", "4"),
+)
+
+
 def get_geo_info(debug: bool = False, ip_version: Optional[str] = None) -> Dict[str, Any]:
     """Retrieves public IP, ISP, ASN, and Geolocation info with dual-stack IPv4/IPv6 support."""
     geo: Dict[str, Any] = {
@@ -1157,28 +1165,55 @@ def get_geo_info(debug: bool = False, ip_version: Optional[str] = None) -> Dict[
         "country_code": "N/A"
     }
 
-    # Primary IPv4 Geolocation
-    try:
-        res = make_http_request("http://ip-api.com/json/?fields=status,message,country,countryCode,regionName,city,isp,org,as,query", timeout=HTTP_TIMEOUT, debug=debug, ip_version="4" if ip_version != "6" else None)
-        if res:
+    # Primary geolocation: try each provider until one returns usable data.
+    for url, forced_v4 in GEO_PROVIDERS:
+        try:
+            res = make_http_request(
+                url,
+                timeout=HTTP_TIMEOUT,
+                debug=debug,
+                ip_version=forced_v4 if forced_v4 else ip_version
+            )
+            if not res:
+                continue
             data = json.loads(res)
-            if isinstance(data, dict) and data.get("status") == "success":
+            if not isinstance(data, dict):
+                continue
+
+            if url.startswith("https://ipwho.is"):
+                if not data.get("success", True):
+                    continue
+                conn = data.get("connection") or {}
+                geo["ip"] = data.get("ip", "Unavailable")
+                geo["isp"] = conn.get("isp") or data.get("isp") or "Unknown ISP"
+                geo["org"] = conn.get("org") or data.get("org") or "Unknown"
+                geo["city"] = data.get("city", "Unknown")
+                geo["country"] = data.get("country", "Unknown")
+                geo["country_code"] = data.get("country_code", "N/A")
+            else:
+                if data.get("status") != "success":
+                    continue
                 geo["ip"] = data.get("query", "Unavailable")
                 geo["isp"] = data.get("isp", "Unknown ISP")
                 geo["org"] = data.get("org", data.get("isp", "Unknown"))
                 geo["city"] = data.get("city", "Unknown")
                 geo["country"] = data.get("country", "Unknown")
                 geo["country_code"] = data.get("countryCode", "N/A")
-    except Exception as e:
-        if debug:
-            print(f"{C.YELLOW}[DEBUG] Primary geo lookup failed: {e}{C.RESET}")
+
+            if geo["ip"] != "Unavailable":
+                break
+        except Exception as e:
+            if debug:
+                print(f"{C.YELLOW}[DEBUG] Geo lookup via {url.split('?')[0]} failed: {e}{C.RESET}")
 
     # Fallback IPv4 if needed
     if geo["ip"] == "Unavailable":
         try:
             ip_str = make_http_request("https://api.ipify.org?format=json", timeout=3, debug=debug, ip_version="4")
             if ip_str:
-                geo["ip"] = json.loads(ip_str).get("ip", "Unavailable")
+                parsed = json.loads(ip_str)
+                if isinstance(parsed, dict):
+                    geo["ip"] = parsed.get("ip", "Unavailable")
         except Exception:
             pass
 
@@ -1186,7 +1221,8 @@ def get_geo_info(debug: bool = False, ip_version: Optional[str] = None) -> Dict[
     try:
         res_v6 = make_http_request("https://api64.ipify.org?format=json", timeout=3, debug=debug, ip_version="6")
         if res_v6:
-            v6_val = json.loads(res_v6).get("ip", "")
+            parsed_v6 = json.loads(res_v6)
+            v6_val = parsed_v6.get("ip", "") if isinstance(parsed_v6, dict) else ""
             if ":" in v6_val:
                 geo["ipv6"] = v6_val
     except Exception:

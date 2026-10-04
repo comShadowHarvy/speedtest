@@ -314,6 +314,61 @@ class TestPrintDNSLeaderboard(unittest.TestCase):
         self.assertIn("Best for Speed & Privacy", out)
 
 
+class TestGeoInfo(unittest.TestCase):
+    IPWHO_OK = json.dumps({
+        "success": True, "ip": "1.2.3.4", "city": "Ottawa",
+        "country": "Canada", "country_code": "CA",
+        "connection": {"isp": "ExampleISP", "org": "ExampleOrg", "asn": 64500},
+    })
+    IPAPI_OK = json.dumps({
+        "status": "success", "query": "5.6.7.8", "city": "Toronto",
+        "country": "Canada", "countryCode": "CA",
+        "isp": "LegacyISP", "org": "LegacyOrg",
+    })
+
+    def _route(self, mapping):
+        def side_effect(url, **kwargs):
+            for frag, payload in mapping.items():
+                if frag in url:
+                    return payload
+            return None
+        return side_effect
+
+    def test_prefers_https_provider(self):
+        with patch("speedtest.make_http_request", side_effect=self._route({"ipwho.is": self.IPWHO_OK})):
+            geo = speedtest.get_geo_info()
+        self.assertEqual(geo["ip"], "1.2.3.4")
+        self.assertEqual(geo["isp"], "ExampleISP")
+        self.assertEqual(geo["org"], "ExampleOrg")
+        self.assertEqual(geo["country_code"], "CA")
+
+    def test_falls_back_to_legacy_provider(self):
+        with patch("speedtest.make_http_request", side_effect=self._route({"ip-api.com": self.IPAPI_OK})):
+            geo = speedtest.get_geo_info()
+        self.assertEqual(geo["ip"], "5.6.7.8")
+        self.assertEqual(geo["isp"], "LegacyISP")
+
+    def test_skips_provider_reporting_failure(self):
+        failed = json.dumps({"success": False, "message": "quota exceeded"})
+        with patch("speedtest.make_http_request", side_effect=self._route({"ipwho.is": failed, "ip-api.com": self.IPAPI_OK})):
+            geo = speedtest.get_geo_info()
+        self.assertEqual(geo["ip"], "5.6.7.8")
+
+    def test_all_providers_fail_returns_defaults(self):
+        with patch("speedtest.make_http_request", return_value=None):
+            geo = speedtest.get_geo_info()
+        self.assertEqual(geo["ip"], "Unavailable")
+        self.assertEqual(geo["ipv6"], "Unavailable")
+
+    def test_malformed_json_does_not_raise(self):
+        with patch("speedtest.make_http_request", return_value="<html>not json</html>"):
+            geo = speedtest.get_geo_info()
+        self.assertEqual(geo["ip"], "Unavailable")
+
+    def test_https_provider_is_tried_first(self):
+        self.assertTrue(speedtest.GEO_PROVIDERS[0][0].startswith("https://"))
+
+
 class TestModuleShadowing(unittest.TestCase):
     """Local variables must never shadow the stdlib modules the tool relies on."""
 
