@@ -1112,6 +1112,34 @@ class TestDisplayHistory(unittest.TestCase):
         out = buf.getvalue()
         self.assertIn("Could not read prior history file", out)
 
+    def test_display_history_null_sections_in_entries(self):
+        payload = json.dumps([{"timestamp": None, "network": None, "statistics": None, "suitability": None},
+                              {"timestamp": "2026-09-25T12:00:00", "network": {"geo": None, "adapter": None},
+                               "statistics": {"speedtest_download_mbps": None, "bufferbloat": None},
+                               "suitability": {"overall_score": 80}}])
+        buf = io.StringIO()
+        with patch("os.path.exists", return_value=True), \
+             patch("builtins.open", mock_open(read_data=payload)), \
+             patch("sys.stdout", buf):
+            code = speedtest.display_history(inline=True, show_graph=True)
+        self.assertEqual(code, 0)
+
+    def test_html_history_rows_tolerate_null_sections(self):
+        with tempfile.TemporaryDirectory() as td:
+            hf = os.path.join(td, "history.json")
+            with open(hf, "w") as f:
+                json.dump([{"timestamp": None, "statistics": None, "suitability": None},
+                           {"timestamp": "2026-09-25T12:00:00", "statistics": {"speedtest_download_mbps": None},
+                            "suitability": {"overall_score": 80}}], f)
+            out = os.path.join(td, "r.html")
+            data = {
+                "timestamp": "2026-09-13T12:00:00", "version": "3.2.0",
+                "network": {}, "statistics": {}, "suitability": {},
+                "dns_recommendation": {},
+            }
+            with patch("speedtest.HISTORY_FILE", hf):
+                self.assertTrue(speedtest.export_html_report(out, data))
+
     def test_display_history_non_list_payload(self):
         # A hand-edited/legacy file containing an object must not crash with TypeError.
         buf = io.StringIO()

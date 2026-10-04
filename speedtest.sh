@@ -1692,16 +1692,19 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
         history_rows = ""
         for h in recent_history:
             h_ts = html.escape(str(h.get("timestamp", "")).replace("T", " ")[:16])
-            h_stats = h.get("statistics", {})
-            h_dl = max(
-                h_stats.get("speedtest_download_mbps", {}).get("avg", 0.0),
-                h_stats.get("fast_download_mbps", {}).get("avg", 0.0),
-                h_stats.get("cloudflare_download_mbps", {}).get("avg", 0.0),
-                h_stats.get("custom_download_mbps", {}).get("avg", 0.0)
-            )
-            h_ping = h_stats.get("ping_ms", {}).get("avg", 0.0)
-            h_bb = html.escape(str(h_stats.get("bufferbloat", {}).get("grade", "N/A")))
-            h_score = html.escape(str(h.get("suitability", {}).get("overall_score", "N/A")))
+            h_stats = h.get("statistics") or {}
+            try:
+                h_dl = max(
+                    float((h_stats.get("speedtest_download_mbps") or {}).get("avg", 0.0) or 0.0),
+                    float((h_stats.get("fast_download_mbps") or {}).get("avg", 0.0) or 0.0),
+                    float((h_stats.get("cloudflare_download_mbps") or {}).get("avg", 0.0) or 0.0),
+                    float((h_stats.get("custom_download_mbps") or {}).get("avg", 0.0) or 0.0)
+                )
+            except (TypeError, ValueError):
+                h_dl = 0.0
+            h_ping = (h_stats.get("ping_ms") or {}).get("avg", 0.0)
+            h_bb = html.escape(str((h_stats.get("bufferbloat") or {}).get("grade", "N/A")))
+            h_score = html.escape(str((h.get("suitability") or {}).get("overall_score", "N/A")))
             history_rows += f"<tr><td>{h_ts}</td><td><strong>{h_dl:.1f} Mbps</strong></td><td>{h_ping:.1f} ms</td><td><span class='badge'>{h_bb}</span></td><td><strong>{h_score}/100</strong></td></tr>"
 
         dns_rows = ""
@@ -2537,22 +2540,31 @@ def display_history(clear: bool = False, no_color: bool = False, show_graph: boo
     ookla_dls, fast_dls, cf_dls, pings, scores = [], [], [], [], []
 
     for entry in history[-15:]:
-        dt = entry.get("timestamp", "").replace("T", " ")[:16]
-        net = entry.get("network", {})
-        isp = net.get("geo", {}).get("isp", net.get("isp", "Unknown"))
+        dt = str(entry.get("timestamp") or "").replace("T", " ")[:16]
+        net = entry.get("network") or {}
+        isp = (net.get("geo") or {}).get("isp", net.get("isp", "Unknown"))
+        if not isp:
+            isp = "Unknown"
         if len(isp) > 12:
             isp = isp[:10] + ".."
-        iface = net.get("adapter", {}).get("interface", "")
+        iface = (net.get("adapter") or {}).get("interface", "")
         if_info = f"{isp} ({iface})" if iface else isp
 
-        stats = entry.get("statistics", {})
-        st_dl = stats.get("speedtest_download_mbps", {}).get("avg", 0.0)
-        fast_dl = stats.get("fast_download_mbps", {}).get("avg", 0.0)
-        cf_dl = stats.get("cloudflare_download_mbps", {}).get("avg", 0.0)
-        ping = stats.get("ping_ms", {}).get("avg", 0.0)
-        bb = stats.get("bufferbloat", {})
+        stats = entry.get("statistics") or {}
+
+        def _avg(section: Optional[Dict[str, Any]]) -> float:
+            try:
+                return float((stats.get(section) or {}).get("avg", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        st_dl = _avg("speedtest_download_mbps")
+        fast_dl = _avg("fast_download_mbps")
+        cf_dl = _avg("cloudflare_download_mbps")
+        ping = _avg("ping_ms")
+        bb = stats.get("bufferbloat") or {}
         bb_str = f"{bb.get('grade', 'N/A')} (+{bb.get('delta_ms', 0)}ms)" if bb else "N/A"
-        score = entry.get("suitability", {}).get("overall_score", 0.0)
+        score = (entry.get("suitability") or {}).get("overall_score", 0.0)
 
         if st_dl:
             ookla_dls.append(st_dl)
@@ -2584,9 +2596,9 @@ def display_history(clear: bool = False, no_color: bool = False, show_graph: boo
     print(f"  Ookla DL: {C.GREEN}{st_avg} Mbps{C.RESET} | Fast DL: {C.GREEN}{fast_avg} Mbps{C.RESET} | Cloudflare DL: {C.GREEN}{cf_avg} Mbps{C.RESET} | Ping: {C.YELLOW}{ping_avg} ms{C.RESET} | Score: {C.CYAN}{score_avg}/100{C.RESET}")
 
     if show_graph and (cf_dls or ookla_dls or fast_dls):
-        all_speeds = [max(entry.get("statistics", {}).get("cloudflare_download_mbps", {}).get("avg", 0.0),
-                          entry.get("statistics", {}).get("speedtest_download_mbps", {}).get("avg", 0.0),
-                          entry.get("statistics", {}).get("fast_download_mbps", {}).get("avg", 0.0))
+        all_speeds = [max((entry.get("statistics") or {}).get("cloudflare_download_mbps", {}).get("avg", 0.0),
+                          (entry.get("statistics") or {}).get("speedtest_download_mbps", {}).get("avg", 0.0),
+                          (entry.get("statistics") or {}).get("fast_download_mbps", {}).get("avg", 0.0))
                       for entry in history[-25:] if entry.get("statistics")]
         all_speeds = [s for s in all_speeds if s > 0]
         if len(all_speeds) >= 2:
