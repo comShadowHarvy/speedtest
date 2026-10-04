@@ -864,6 +864,26 @@ class TestDisplayHistory(unittest.TestCase):
         out = buf.getvalue()
         self.assertIn("Could not read prior history file", out)
 
+    def test_display_history_non_list_payload(self):
+        # A hand-edited/legacy file containing an object must not crash with TypeError.
+        buf = io.StringIO()
+        with patch("os.path.exists", return_value=True), \
+             patch("builtins.open", mock_open(read_data=json.dumps({"oops": True}))), \
+             patch("sys.stdout", buf):
+            code = speedtest.display_history(inline=True)
+        self.assertEqual(code, 0)
+        self.assertIn("empty", buf.getvalue())
+
+    def test_display_history_filters_non_dict_entries(self):
+        payload = json.dumps([{"timestamp": "2026-09-25T12:00:00", "network": {"geo": {"isp": "KeepISP"}}, "statistics": {}, "suitability": {}}, "garbage", 42, None])
+        buf = io.StringIO()
+        with patch("os.path.exists", return_value=True), \
+             patch("builtins.open", mock_open(read_data=payload)), \
+             patch("sys.stdout", buf):
+            code = speedtest.display_history(inline=True)
+        self.assertEqual(code, 0)
+        self.assertIn("KeepISP", buf.getvalue())
+
 
 class TestBrowserPriority(unittest.TestCase):
     def test_firefox_priority(self):

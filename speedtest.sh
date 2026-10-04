@@ -1646,7 +1646,9 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
         if os.path.exists(HISTORY_FILE):
             try:
                 with open(HISTORY_FILE, "r") as f:
-                    recent_history = json.load(f)[-10:]
+                    raw_history = json.load(f)
+                if isinstance(raw_history, list):
+                    recent_history = [e for e in raw_history[-10:] if isinstance(e, dict)]
             except Exception:
                 pass
 
@@ -2399,6 +2401,11 @@ def display_history(clear: bool = False, no_color: bool = False, show_graph: boo
         else:
             print(f"{C.RED}[!] Failed to read history file: {e}{C.RESET}")
         return 1
+
+    # Tolerate hand-edited/legacy files: keep only well-formed list entries.
+    if not isinstance(history, list):
+        history = []
+    history = [e for e in history if isinstance(e, dict)]
 
     if not history:
         if inline:
