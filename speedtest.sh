@@ -2871,6 +2871,7 @@ def run_benchmark_cycle(args) -> int:
 
 MAX_RUNS = 20
 MAX_MONITOR_MINUTES = 1440
+MAX_CONSECUTIVE_MONITOR_FAILURES = 3
 
 
 def validate_args(args) -> Optional[str]:
@@ -2999,11 +3000,21 @@ def run_benchmark() -> int:
     if args.monitor:
         print(f"{C.CYAN}{C.BOLD}[i] Continuous Monitoring Mode Active (Interval: {args.monitor} mins). Press Ctrl+C to stop.{C.RESET}\n")
         cycle = 1
+        consecutive_failures = 0
         while True:
             print(f"{C.MAGENTA}{C.BOLD}--- Monitoring Cycle #{cycle} [{datetime.now().strftime('%H:%M:%S')}] ---{C.RESET}")
-            run_benchmark_cycle(args)
+            cycle_code = run_benchmark_cycle(args)
+            # Exit 2 means no engine produced a measurement (e.g. all endpoints blocked).
+            consecutive_failures = consecutive_failures + 1 if cycle_code == 2 else 0
+            if consecutive_failures >= MAX_CONSECUTIVE_MONITOR_FAILURES:
+                print(f"{C.RED}[!] Aborting monitoring: {consecutive_failures} consecutive cycles produced no measurements.{C.RESET}")
+                return 2
             cycle += 1
-            time.sleep(args.monitor * 60)
+            try:
+                time.sleep(args.monitor * 60)
+            except KeyboardInterrupt:
+                print(f"\n{C.YELLOW}[!] Monitoring stopped by user after {cycle - 1} cycle(s){C.RESET}")
+                return 0
 
     return run_benchmark_cycle(args)
 

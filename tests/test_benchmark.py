@@ -1113,5 +1113,42 @@ class TestValidateArgs(unittest.TestCase):
         self.assertIn("--threshold-ping", speedtest.validate_args(self._args(threshold_ping=0)))
 
 
+class TestMonitorMode(unittest.TestCase):
+    def _cycle_codes(self, codes):
+        it = iter(codes)
+        return lambda *a, **k: next(it)
+
+    def _run(self, codes):
+        with patch("sys.argv", ["speedtest.sh", "--monitor", "1", "--no-html", "--no-open", "--no-dns"]), \
+             patch("speedtest.run_benchmark_cycle", side_effect=self._cycle_codes(codes)) as mock_cycle, \
+             patch("speedtest.print_banner"), \
+             patch("sys.stdout", io.StringIO()), \
+             patch("time.sleep") as mock_sleep:
+            code = speedtest.run_benchmark()
+        return code, mock_cycle, mock_sleep
+
+    def test_aborts_after_consecutive_no_measurement_cycles(self):
+        code, mock_cycle, mock_sleep = self._run([2, 2, 2])
+        self.assertEqual(code, 2)
+        self.assertEqual(mock_cycle.call_count, speedtest.MAX_CONSECUTIVE_MONITOR_FAILURES)
+        # No sleep after the cycle that triggered the abort.
+        self.assertEqual(mock_sleep.call_count, speedtest.MAX_CONSECUTIVE_MONITOR_FAILURES - 1)
+
+    def test_success_resets_failure_counter(self):
+        # 2 failures, a success, then 3 failures: aborts on cycle 6, not cycle 3.
+        code, mock_cycle, mock_sleep = self._run([2, 2, 0, 2, 2, 2])
+        self.assertEqual(code, 2)
+        self.assertEqual(mock_cycle.call_count, 6)
+        self.assertEqual(mock_sleep.call_count, 5)
+
+    def test_ctrl_c_during_sleep_exits_cleanly(self):
+        with patch("sys.argv", ["speedtest.sh", "--monitor", "1", "--no-html", "--no-open", "--no-dns"]), \
+             patch("speedtest.run_benchmark_cycle", return_value=0), \
+             patch("speedtest.print_banner"), \
+             patch("sys.stdout", io.StringIO()), \
+             patch("time.sleep", side_effect=KeyboardInterrupt):
+            self.assertEqual(speedtest.run_benchmark(), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
