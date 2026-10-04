@@ -143,12 +143,42 @@ python3 speedtest.sh [options]
 --history               Display historical benchmark logs and averages
 --history-graph         Render sparkline trend graph with history
 --history-clear         Clear historical benchmark log file
---monitor MINS          Continuous monitoring mode interval in minutes
+--monitor MINS          Continuous monitoring mode interval in minutes (1..1440)
 --quiet                 Suppress banner and live progress output, show only summary
 --no-color              Disable ANSI terminal colors
 --debug                 Enable debug logs for troubleshooting
 --version               Show version and exit
 ```
+
+### Argument Validation
+
+Invalid flag combinations fail fast, before any benchmark work is done:
+
+- `--runs` must be between 1 and 20
+- `--timeout` must be at least 1 second
+- `--monitor` must be between 1 and 1440 minutes
+- `--threshold-dl`, `--threshold-ul`, `--threshold-ping` must be greater than 0
+- `--engine custom` requires `--server <URL>`
+- `--server` cannot be combined with a non-`all`, non-`custom` engine
+- `--dns`/`--no-dns`, `-4`/`-6`, `--html`/`--no-html`, `--open`/`--no-open` are mutually exclusive
+
+### Exit Codes
+
+| Code | Meaning |
+| ---- | ------- |
+| 0 | Success |
+| 1 | Invalid arguments, or a report export failed |
+| 2 | No benchmark engine produced a measurement |
+| 3 | An SLA threshold was violated |
+| 130 | Interrupted by user (Ctrl+C) |
+
+In `--json-stdout` mode, JSON is the only thing written to stdout; SLA alerts
+and export errors go to stderr so the output stays pipeable into `jq`.
+SLA thresholds are only evaluated when at least one measurement succeeded, so
+a fully failed run reports exit code 2 instead of false threshold breaches.
+
+In `--monitor` mode, monitoring aborts with exit code 2 after 3 consecutive
+cycles produced no measurements, and `Ctrl+C` exits cleanly with code 0.
 
 ---
 
@@ -187,6 +217,11 @@ python3 speedtest.sh [options]
 ### 7. Custom CDN Server Benchmark
 ```bash
 ./speedtest.sh --server "https://speed.hetzner.de/100MB.bin" --dns
+```
+
+### 8. Custom Engine Only (skip all built-in engines)
+```bash
+./speedtest.sh --engine custom --server "https://speed.hetzner.de/100MB.bin"
 ```
 
 ---
