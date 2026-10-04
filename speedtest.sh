@@ -52,6 +52,7 @@ SITE_TIMING_WORKERS = 8
 SITE_TIMING_RUNS = 3
 TRACEROUTE_DEFAULT_MAX_HOPS = 20
 TRACEROUTE_MAX_HOPS = 64
+TRACEROUTE_DEFAULT_HOSTS = ["www.google.com", "www.amazon.com"]
 
 # --- Version & Constants ---
 VERSION = "3.2.0"
@@ -3241,13 +3242,26 @@ def run_benchmark_cycle(args) -> int:
             )
 
             # Hop-by-hop layer: only when a traceroute binary is actually available.
+            # Traces run concurrently: a lossy network can burn the full per-probe
+            # wait on every hop, so serial tracing would dominate the run time.
             if find_traceroute_command():
                 max_hops = min(getattr(args, "trace_hops", TRACEROUTE_DEFAULT_MAX_HOPS), TRACEROUTE_MAX_HOPS)
-                trace_hosts = [custom_trace_host] if custom_trace_host else ["www.google.com", "www.amazon.com"]
-                for th in trace_hosts:
-                    trace = run_traceroute(th, max_hops=max_hops, quiet=True, debug=args.debug, ip_version=ip_ver)
-                    if trace:
-                        traceroute_results.append(trace)
+                trace_hosts = [custom_trace_host] if custom_trace_host else TRACEROUTE_DEFAULT_HOSTS
+                with ThreadPoolExecutor(max_workers=min(len(trace_hosts), 4)) as tex:
+                    futures = [tex.submit(run_traceroute, th, max_hops, True, args.debug, ip_ver)
+                               for th in trace_hosts]
+                    for fut in as_completed(futures):
+                        try:
+                            trace = fut.result()
+                        except Exception as e:
+                            if args.debug:
+                                print(f"{C.YELLOW}[DEBUG] traceroute failed: {e}{C.RESET}")
+                            continue
+                        if trace:
+                            traceroute_results.append(trace)
+                # Keep a stable, user-defined order rather than completion order.
+                order = {th: i for i, th in enumerate(trace_hosts)}
+                traceroute_results.sort(key=lambda t: order.get(t.get("host"), 99))
             sp_trace.stop(f"Site timing completed ({len(site_timings)} target(s)).")
         except Exception as e:
             sp_trace.stop(f"Site timing encountered an issue: {e}")
@@ -3622,7 +3636,9 @@ def run_benchmark() -> int:
     parser.add_argument("--threshold-ul", type=float, metavar="MBPS", help="Minimum required upload speed (exits with code 3 if violated)")
     parser.add_argument("--threshold-ping", type=float, metavar="MS", help="Maximum acceptable ping latency (exits with code 3 if violated)")
     parser.add_argument("--monitor", type=int, metavar="MINS", help="Continuous monitoring mode interval in minutes")
-    parser.add_argument("--traceroute", action="store_true", help="Measure per-site DNS/TCP/TLS/TTFB timings (YouTube, Google, Amazon, etc.) plus hop-by-hop paths when a traceroute binary is available")
+    trace_group = parser.add_mutually_exclusive_group()
+    trace_group.add_argument("--traceroute", action="store_true", default=True, help="Measure per-site DNS/TCP/TLS/TTFB timings (YouTube, Google, Amazon, etc.) plus hop-by-hop paths when a traceroute binary is available (default: enabled)")
+    trace_group.add_argument("--no-traceroute", action="store_true", help="Explicitly skip traceroute-style site timing and hop traces")
     parser.add_argument("--trace-target", type=str, metavar="HOST", help="Probe only this host instead of the built-in popular-site list (implies timing data for it)")
     parser.add_argument("--trace-hops", type=int, default=TRACEROUTE_DEFAULT_MAX_HOPS, metavar="N", help=f"Maximum hops for path traces (default: {TRACEROUTE_DEFAULT_MAX_HOPS}, max: {TRACEROUTE_MAX_HOPS})")
     parser.add_argument("--trace-runs", type=int, default=SITE_TIMING_RUNS, metavar="N", help=f"Samples per site for median timing (default: {SITE_TIMING_RUNS}, max: 10)")
@@ -3634,6 +3650,9 @@ def run_benchmark() -> int:
 
     if getattr(args, "no_dns", False):
         args.dns = False
+
+    if getattr(args, "no_traceroute", False):
+        args.traceroute = False
 
     # --trace-target is only meaningful with the traceroute suite enabled.
     if getattr(args, "trace_target", None):

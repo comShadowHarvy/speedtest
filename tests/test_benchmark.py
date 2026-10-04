@@ -1634,11 +1634,27 @@ class TestTracerouteCliFlags(unittest.TestCase):
             self.assertTrue(args.traceroute)
             self.assertEqual(args.trace_target, "www.example.com")
 
-    def test_traceroute_disabled_by_default(self):
+    def test_traceroute_enabled_by_default(self):
         with patch("sys.argv", ["speedtest.sh"]), \
              patch("speedtest.run_benchmark_cycle", return_value=0) as mock_cycle:
             speedtest.run_benchmark()
-            self.assertFalse(mock_cycle.call_args[0][0].traceroute)
+            self.assertIs(mock_cycle.call_args[0][0].traceroute, True)
+
+    def test_no_traceroute_disables_it(self):
+        with patch("sys.argv", ["speedtest.sh", "--no-traceroute"]), \
+             patch("speedtest.run_benchmark_cycle", return_value=0) as mock_cycle:
+            speedtest.run_benchmark()
+            self.assertIs(mock_cycle.call_args[0][0].traceroute, False)
+
+    def test_traceroute_and_no_traceroute_mutually_exclusive(self):
+        with patch("sys.argv", ["speedtest.sh", "--traceroute", "--no-traceroute"]), \
+             patch("sys.stderr", io.StringIO()):
+            with self.assertRaises(SystemExit) as cm:
+                speedtest.run_benchmark()
+            self.assertEqual(cm.exception.code, 2)
+
+    def test_default_trace_hosts_are_constant(self):
+        self.assertIn("www.google.com", speedtest.TRACEROUTE_DEFAULT_HOSTS)
 
     def test_validate_args_covers_trace_options(self):
         args = MagicMock()
