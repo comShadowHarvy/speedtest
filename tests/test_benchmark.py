@@ -646,6 +646,66 @@ class TestReportsExport(unittest.TestCase):
             if os.path.exists(tf_path):
                 os.unlink(tf_path)
 
+    def test_md_escape_neutralizes_table_breaking_values(self):
+        self.assertEqual(speedtest.md_escape("a|b"), "a\\|b")
+        self.assertEqual(speedtest.md_escape("line1\nline2"), "line1 line2")
+        self.assertEqual(speedtest.md_escape("cr\r\nlf"), "cr lf")
+        self.assertEqual(speedtest.md_escape("back`tick"), "back'tick")
+        self.assertEqual(speedtest.md_escape("back\\slash"), "back\\\\slash")
+        self.assertEqual(speedtest.md_escape(42), "42")
+
+    def test_markdown_report_escapes_host_values(self):
+        data = json.loads(json.dumps(self.test_data))
+        data["network"]["geo"]["isp"] = "Evil|ISP"
+        data["network"]["adapter"]["wifi_ssid"] = "My|SSID"
+        data["dns_recommendation"]["leaderboard"] = [
+            {"rank": 1, "name": "Pipe|Name", "ip": "1.1.1.1", "latency_ms": 5.0, "category": "Fast|Secure"}
+        ]
+        with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as tf:
+            tf_path = tf.name
+        try:
+            self.assertTrue(speedtest.export_markdown_report(tf_path, data))
+            with open(tf_path, "r") as f:
+                content = f.read()
+            self.assertIn("Evil\\|ISP", content)
+            self.assertIn("Pipe\\|Name", content)
+            self.assertIn("Fast\\|Secure", content)
+        finally:
+            if os.path.exists(tf_path):
+                os.unlink(tf_path)
+
+    def test_markdown_report_creates_missing_directories(self):
+        with tempfile.TemporaryDirectory() as td:
+            target = os.path.join(td, "nested", "deeper", "report.md")
+            self.assertTrue(speedtest.export_markdown_report(target, self.test_data))
+            self.assertTrue(os.path.exists(target))
+
+    def test_markdown_report_handles_non_string_timestamp(self):
+        data = json.loads(json.dumps(self.test_data))
+        data["timestamp"] = None
+        with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as tf:
+            tf_path = tf.name
+        try:
+            self.assertTrue(speedtest.export_markdown_report(tf_path, data))
+        finally:
+            if os.path.exists(tf_path):
+                os.unlink(tf_path)
+
+    def test_markdown_report_non_numeric_dns_latency(self):
+        data = json.loads(json.dumps(self.test_data))
+        data["dns_recommendation"]["leaderboard"] = [
+            {"rank": 1, "name": "X", "ip": "1.1.1.1", "latency_ms": "n/a", "category": "C"}
+        ]
+        with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as tf:
+            tf_path = tf.name
+        try:
+            self.assertTrue(speedtest.export_markdown_report(tf_path, data))
+            with open(tf_path, "r") as f:
+                self.assertIn("0.00 ms", f.read())
+        finally:
+            if os.path.exists(tf_path):
+                os.unlink(tf_path)
+
     def test_export_json_report(self):
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
             tf_path = tf.name

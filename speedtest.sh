@@ -2213,17 +2213,68 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
         return False
 
 
+def md_escape(value: Any) -> str:
+    """Make a value safe for Markdown tables and inline code spans.
+
+    Host-provided strings (ISP, Wi-Fi SSID, DNS names) can contain pipes that
+    break table layout, or backticks/newlines that break inline code spans.
+    """
+    s = str(value)
+    s = s.replace("\\", "\\\\").replace("|", "\\|").replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    s = s.replace("`", "'")
+    return s
+
+
 def export_markdown_report(filepath: str, export_data: Dict[str, Any], debug: bool = False) -> bool:
     """Generates a structured GitHub-flavored Markdown report."""
     try:
-        ts = export_data.get("timestamp", "").replace("T", " ")[:19]
-        ver = export_data.get("version", VERSION)
+        dir_name = os.path.dirname(os.path.abspath(filepath))
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+        ts = str(export_data.get("timestamp", "")).replace("T", " ")[:19]
+        ver = md_escape(export_data.get("version", VERSION))
         net = export_data.get("network", {})
         geo = net.get("geo", {})
         adapter = net.get("adapter", {})
         stats = export_data.get("statistics", {})
         suitability = export_data.get("suitability", {})
         dns_rec = export_data.get("dns_recommendation", {})
+
+        m_isp = md_escape(geo.get("isp", "Unknown"))
+        m_ip = md_escape(geo.get("ip", "N/A"))
+        m_tier = md_escape(suitability.get("speed_tier", "N/A"))
+        m_iface = md_escape(adapter.get("interface", "Unknown"))
+        m_iface_type = md_escape(adapter.get("interface_type", "Ethernet"))
+        m_link = md_escape(adapter.get("link_speed", "N/A"))
+        m_gw = md_escape(adapter.get("gateway", "N/A"))
+        m_mtu = md_escape(adapter.get("mtu", "1500"))
+        m_status = md_escape(dns_rec.get("status_message", ""))
+        m_gaming = md_escape(suitability.get("gaming", {}).get("status", "N/A"))
+        m_streaming = md_escape(suitability.get("streaming", {}).get("status", "N/A"))
+        m_calls = md_escape(suitability.get("video_call", {}).get("status", "N/A"))
+        m_ssid = md_escape(adapter.get("wifi_ssid"))
+        m_signal = md_escape(adapter.get("wifi_signal"))
+        m_freq = md_escape(adapter.get("wifi_frequency"))
+
+        # DNS leaderboard table, built with escaped cells so resolver names/IPs
+        # containing pipes cannot break the table layout.
+        md_dns_table = ""
+        if dns_rec:
+            medals = {1: "🥇 1", 2: "🥈 2", 3: "🥉 3"}
+            rows = ["| Rank | Resolver | IP Address | Latency | Category / Best For |",
+                    "| :---: | :--- | :--- | :---: | :--- |"]
+            for idx, item in enumerate(dns_rec.get("leaderboard", []), start=1):
+                try:
+                    lat = float(item.get("latency_ms", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    lat = 0.0
+                rank_label = medals.get(idx, f"#{idx}")
+                rows.append(
+                    f"| {rank_label} | **{md_escape(item.get('name', ''))}** | "
+                    f"`{md_escape(item.get('ip', ''))}` | **{lat:.2f} ms** | "
+                    f"{md_escape(item.get('category', ''))} |"
+                )
+            md_dns_table = "\n".join(rows) + "\n"
 
         st_dl = stats.get("speedtest_download_mbps", {}).get("avg", 0.0)
         fast_dl = stats.get("fast_download_mbps", {}).get("avg", 0.0)
@@ -2241,8 +2292,8 @@ def export_markdown_report(filepath: str, export_data: Dict[str, Any], debug: bo
 
 - **Date / Time:** `{ts}`
 - **Tool Version:** `v{ver}`
-- **Public IP (WAN):** `{geo.get("ip", "N/A")}` ({geo.get("isp", "Unknown")})
-- **Speed Tier:** **{suitability.get("speed_tier", "N/A")}**
+- **Public IP (WAN):** `{m_ip}` ({m_isp})
+- **Speed Tier:** **{m_tier}**
 - **Quality Score:** **{suitability.get("overall_score", "N/A")}/100**
 
 ---
@@ -2273,35 +2324,32 @@ def export_markdown_report(filepath: str, export_data: Dict[str, Any], debug: bo
 
 ## 🖥️ Network Hardware & Diagnostics
 
-- **Interface:** `{adapter.get("interface", "Unknown")}` ({adapter.get("interface_type", "Ethernet")})
-- **Link Speed:** `{adapter.get("link_speed", "N/A")}`
-- **Gateway IP:** `{adapter.get("gateway", "N/A")}`
-- **Interface MTU:** `{adapter.get("mtu", "1500")}`
-{f'- **Wi-Fi SSID & Signal:** `{adapter.get("wifi_ssid")}` ({adapter.get("wifi_signal")})' if adapter.get("wifi_ssid") not in ("N/A (Wired/Unknown)", "N/A") else ''}
-{f'- **Wi-Fi Frequency:** `{adapter.get("wifi_frequency")}`' if adapter.get("wifi_frequency") not in ("N/A", "") else ''}
+- **Interface:** `{m_iface}` ({m_iface_type})
+- **Link Speed:** `{m_link}`
+- **Gateway IP:** `{m_gw}`
+- **Interface MTU:** `{m_mtu}`
+{f'- **Wi-Fi SSID & Signal:** `{m_ssid}` ({m_signal})' if adapter.get("wifi_ssid") not in ("N/A (Wired/Unknown)", "N/A") else ''}
+{f'- **Wi-Fi Frequency:** `{m_freq}`' if adapter.get("wifi_frequency") not in ("N/A", "") else ''}
 
 ---
 
 ## 🎮 Real-World Readiness
 
-- **Gaming:** {suitability.get("gaming", {}).get("status", "N/A")} ({suitability.get("gaming", {}).get("score", 0)}/100)
-- **4K/8K Streaming:** {suitability.get("streaming", {}).get("status", "N/A")} ({suitability.get("streaming", {}).get("score", 0)}/100)
-- **Video Calls:** {suitability.get("video_call", {}).get("status", "N/A")} ({suitability.get("video_call", {}).get("score", 0)}/100)
+- **Gaming:** {m_gaming} ({suitability.get("gaming", {}).get("score", 0)}/100)
+- **4K/8K Streaming:** {m_streaming} ({suitability.get("streaming", {}).get("score", 0)}/100)
+- **Video Calls:** {m_calls} ({suitability.get("video_call", {}).get("score", 0)}/100)
 
 ---
 
 ## 💡 DNS Resolution Leaderboard & Recommendations
 
-{f"""| Rank | Resolver | IP Address | Latency | Category / Best For |
-| :---: | :--- | :--- | :---: | :--- |
-""" + "".join([f"| {'🥇 1' if item['rank']==1 else ('🥈 2' if item['rank']==2 else ('🥉 3' if item['rank']==3 else f'#{item['rank']}'))} | **{item['name']}** | `{item['ip']}` | **{item['latency_ms']:.2f} ms** | {item['category']} |\n" for item in dns_rec.get("leaderboard", [])]) + f"""
+{md_dns_table if dns_rec else "- *DNS resolution benchmarking skipped.*"}
 ### 🏆 Recommended Profiles for Your Network:
 - **🚀 Best for Speed & Privacy:** **{dns_rec.get('profiles', {}).get('best_speed_privacy', {}).get('name', 'Cloudflare')}** (Primary: `{dns_rec.get('profiles', {}).get('best_speed_privacy', {}).get('primary')}`, Secondary: `{dns_rec.get('profiles', {}).get('best_speed_privacy', {}).get('secondary')}` | IPv6: `{dns_rec.get('profiles', {}).get('best_speed_privacy', {}).get('ipv6_primary')}`)
 - **🛡️ Best for Security & Threat Blocking:** **Quad9** (Primary: `{dns_rec.get('profiles', {}).get('best_security', {}).get('primary', '9.9.9.9')}`, Secondary: `{dns_rec.get('profiles', {}).get('best_security', {}).get('secondary', '149.112.112.112')}` | IPv6: `2620:fe::fe`)
 - **🚫 Best for Ad & Tracker Blocking:** **AdGuard** (Primary: `{dns_rec.get('profiles', {}).get('best_adblocking', {}).get('primary', '94.140.14.14')}`, Secondary: `{dns_rec.get('profiles', {}).get('best_adblocking', {}).get('secondary', '94.140.15.15')}` | IPv6: `2a10:50c0::ad1:ff`)
 - **🌐 Best for Anycast Reliability:** **Google** (Primary: `{dns_rec.get('profiles', {}).get('best_reliability', {}).get('primary', '8.8.8.8')}`, Secondary: `{dns_rec.get('profiles', {}).get('best_reliability', {}).get('secondary', '8.8.4.4')}` | IPv6: `2001:4860:4860::8888`)
-- **⚡ Status:** {dns_rec.get("status_message")}
-""" if dns_rec else "- *DNS resolution benchmarking skipped.*"}
+- **⚡ Status:** {m_status}
 
 ---
 *Report generated by Network Speed Benchmark Tool v{ver}*
