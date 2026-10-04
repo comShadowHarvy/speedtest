@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Network Speed Benchmark Dashboard - 2026-10-04 11:58:39</title>
+    <title>Network Speed Benchmark Dashboard - 2026-10-04 12:51:17</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -129,13 +129,13 @@
             padding: 10px 0 16px 0;
             position: relative;
         }
-        .svg-gauge { width: 160px; height: 160px; transform: rotate(-90deg); filter: drop-shadow(0 0 12px #06b6d444); }
+        .svg-gauge { width: 160px; height: 160px; transform: rotate(-90deg); filter: drop-shadow(0 0 12px #10b98144); }
         .svg-gauge circle { fill: none; stroke-width: 10; stroke-linecap: round; }
         .svg-gauge .bg-ring { stroke: var(--gauge-track); }
         .svg-gauge .val-ring {
-            stroke: #06b6d4;
+            stroke: #10b981;
             stroke-dasharray: 314.16;
-            stroke-dashoffset: 73.82759999999999;
+            stroke-dashoffset: 29.845199999999977;
             transition: stroke-dashoffset 1.4s ease-out;
         }
         .gauge-center {
@@ -149,7 +149,7 @@
             justify-content: center;
             pointer-events: none;
         }
-        .score-val { font-size: 38px; font-weight: 900; line-height: 1; color: #06b6d4; }
+        .score-val { font-size: 38px; font-weight: 900; line-height: 1; color: #10b981; }
         .score-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-top: 4px; font-weight: 700; }
         .info-row {
             display: flex;
@@ -244,7 +244,7 @@
         <div class="header">
             <div class="header-title">
                 <h1>Network Benchmark Report</h1>
-                <p>Generated: <strong>2026-10-04 11:58:39</strong> | Tool: <strong>v3.2.0</strong> | Host ISP: <strong>EastLink</strong></p>
+                <p>Generated: <strong>2026-10-04 12:51:17</strong> | Tool: <strong>v3.2.0</strong> | Host ISP: <strong>EastLink</strong></p>
             </div>
             <div class="header-controls">
                 <button class="btn" onclick="toggleTheme()">🌓 Theme</button>
@@ -264,37 +264,37 @@
                         <circle class="val-ring" cx="60" cy="60" r="50"></circle>
                     </svg>
                     <div class="gauge-center">
-                        <div class="score-val">76.5</div>
+                        <div class="score-val">90.5</div>
                         <div class="score-lbl">out of 100</div>
                     </div>
                 </div>
-                <div class="info-row"><span class="info-label">🎮 Gaming Esports:</span><span class="info-val">Fair (Occasional Latency Spikes)</span></div>
+                <div class="info-row"><span class="info-label">🎮 Gaming Esports:</span><span class="info-val">Good (Smooth Casual Gaming)</span></div>
                 <div class="info-row"><span class="info-label">🎥 4K/8K Streaming:</span><span class="info-val">Flawless (Multi-Device 4K/8K HDR)</span></div>
-                <div class="info-row"><span class="info-label">📹 HD Video Calls:</span><span class="info-val">Good (Reliable HD Group Calls)</span></div>
+                <div class="info-row"><span class="info-label">📹 HD Video Calls:</span><span class="info-val">Studio Quality (Flawless HD/4K Calls)</span></div>
             </div>
 
             <!-- Card 2: Directional Bufferbloat Deep-Dive -->
             <div class="card">
-                <div class="card-title">Directional Bufferbloat <span class="badge badge-purple">Grade: B</span></div>
+                <div class="card-title">Directional Bufferbloat <span class="badge badge-purple">Grade: C</span></div>
                 <div class="bb-grid">
                     <div class="bb-box">
                         <div class="bb-box-title">Idle Baseline</div>
-                        <div class="bb-box-val" style="color:var(--accent-yellow)">65.6 <small style="font-size:12px">ms</small></div>
+                        <div class="bb-box-val" style="color:var(--accent-yellow)">49.7 <small style="font-size:12px">ms</small></div>
                         <div class="bb-box-badge"><span class="badge">Reference</span></div>
                     </div>
                     <div class="bb-box">
                         <div class="bb-box-title">DL Active (Down)</div>
-                        <div class="bb-box-val">83.8 <small style="font-size:12px">ms</small></div>
-                        <div class="bb-box-badge"><span class="badge badge-green">+18.17ms (B)</span></div>
+                        <div class="bb-box-val">83.0 <small style="font-size:12px">ms</small></div>
+                        <div class="bb-box-badge"><span class="badge badge-green">+33.31ms (C)</span></div>
                     </div>
                     <div class="bb-box">
                         <div class="bb-box-title">UL Active (Up)</div>
-                        <div class="bb-box-val">60.5 <small style="font-size:12px">ms</small></div>
-                        <div class="bb-box-badge"><span class="badge badge-yellow">+0.0ms (A+)</span></div>
+                        <div class="bb-box-val">67.5 <small style="font-size:12px">ms</small></div>
+                        <div class="bb-box-badge"><span class="badge badge-yellow">+17.78ms (B)</span></div>
                     </div>
                 </div>
-                <div class="info-row"><span class="info-label">Peak Loaded Spike:</span><span class="info-val" style="color:var(--accent-cyan)">+18.17 ms</span></div>
-                <div class="info-row"><span class="info-label">Network Jitter:</span><span class="info-val">32.52 ms</span></div>
+                <div class="info-row"><span class="info-label">Peak Loaded Spike:</span><span class="info-val" style="color:var(--accent-cyan)">+33.31 ms</span></div>
+                <div class="info-row"><span class="info-label">Network Jitter:</span><span class="info-val">5.8 ms</span></div>
                 <div class="info-row"><span class="info-label">ICMP Packet Loss:</span><span class="info-val" style="color:var(--accent-green)">0.0%</span></div>
             </div>
 
@@ -306,7 +306,7 @@
                 <div class="info-row"><span class="info-label">ISP & Location:</span><span class="info-val">EastLink (Minto, Canada)</span></div>
                 <div class="info-row"><span class="info-label">Interface:</span><span class="info-val font-mono">wlan0 (Wi-Fi)</span></div>
                 <div class="info-row"><span class="info-label">Hardware Link Speed:</span><span class="info-val" style="color:var(--accent-green)">864.8 MBit/s</span></div>
-                <div class="info-row"><span class="info-label">Wi-Fi Network:</span><span class="info-val">RCMP_mobile (-51 dBm)</span></div>
+                <div class="info-row"><span class="info-label">Wi-Fi Network:</span><span class="info-val">RCMP_mobile (-48 dBm)</span></div>
                 <div class="info-row"><span class="info-label">Wi-Fi Band:</span><span class="info-val">5745 MHz (5 GHz)</span></div>
                 <div class="info-row"><span class="info-label">Local Gateway IP:</span><span class="info-val font-mono">192.168.1.1</span></div>
                 <div class="info-row"><span class="info-label">Interface MTU:</span><span class="info-val font-mono">1500</span></div>
@@ -318,29 +318,29 @@
             <div class="card-title">Multi-Engine Bandwidth Benchmarks (Mbps)</div>
             <div class="bar-container">
                 
-                <div class="bar-label"><span>Ookla Speedtest (Download)</span><span style="color:var(--accent-green)">69.86 Mbps</span></div>
-                <div class="bar-bg"><div class="bar-fill" style="width:94.0495422724825%; background:linear-gradient(90deg, #10b981, #34d399)"></div></div>
+                <div class="bar-label"><span>Ookla Speedtest (Download)</span><span style="color:var(--accent-green)">66.75 Mbps</span></div>
+                <div class="bar-bg"><div class="bar-fill" style="width:71.5894465894466%; background:linear-gradient(90deg, #10b981, #34d399)"></div></div>
                 
 
                 
-                <div class="bar-label"><span>Fast.com / Netflix CDN (Download)</span><span style="color:var(--accent-cyan)">71.37 Mbps</span></div>
-                <div class="bar-bg"><div class="bar-fill" style="width:96.08239095315024%; background:linear-gradient(90deg, #06b6d4, #38bdf8)"></div></div>
+                <div class="bar-label"><span>Fast.com / Netflix CDN (Download)</span><span style="color:var(--accent-cyan)">93.24 Mbps</span></div>
+                <div class="bar-bg"><div class="bar-fill" style="width:100.0%; background:linear-gradient(90deg, #06b6d4, #38bdf8)"></div></div>
                 
 
                 
-                <div class="bar-label"><span>Cloudflare CDN (Download)</span><span style="color:var(--accent-purple)">74.28 Mbps</span></div>
-                <div class="bar-bg"><div class="bar-fill" style="width:100.0%; background:linear-gradient(90deg, #8b5cf6, #a78bfa)"></div></div>
+                <div class="bar-label"><span>Cloudflare CDN (Download)</span><span style="color:var(--accent-purple)">60.83 Mbps</span></div>
+                <div class="bar-bg"><div class="bar-fill" style="width:65.24024024024024%; background:linear-gradient(90deg, #8b5cf6, #a78bfa)"></div></div>
                 
 
                 
 
                 
-                <div class="bar-label"><span>Cloudflare CDN (Upload)</span><span style="color:var(--accent-yellow)">9.18 Mbps</span></div>
-                <div class="bar-bg"><div class="bar-fill" style="width:71.66276346604215%; background:linear-gradient(90deg, #f59e0b, #fbbf24)"></div></div>
+                <div class="bar-label"><span>Cloudflare CDN (Upload)</span><span style="color:var(--accent-yellow)">7.69 Mbps</span></div>
+                <div class="bar-bg"><div class="bar-fill" style="width:62.826797385620914%; background:linear-gradient(90deg, #f59e0b, #fbbf24)"></div></div>
                 
 
                 
-                <div class="bar-label"><span>Ookla Speedtest (Upload)</span><span style="color:var(--accent-yellow)">12.81 Mbps</span></div>
+                <div class="bar-label"><span>Ookla Speedtest (Upload)</span><span style="color:var(--accent-yellow)">12.24 Mbps</span></div>
                 <div class="bar-bg"><div class="bar-fill" style="width:100.0%; background:linear-gradient(90deg, #d97706, #f59e0b)"></div></div>
                 
             </div>
@@ -354,14 +354,14 @@
                 <thead>
                     <tr><th>Rank</th><th>Resolver Name</th><th>IP Address</th><th>Avg Latency</th><th>Category / Best For</th></tr>
                 </thead>
-                <tbody><tr><td><strong>🥇 1</strong></td><td><strong>System DNS (fd8b:88ea:d899:1::1)</strong></td><td><code class='font-mono'>fd8b:88ea:d899:1::1</code><button class='copy-ip-btn' onclick='copyText(&quot;fd8b:88ea:d899:1::1&quot;)'>📋</button></td><td style='color:var(--accent-green)'><strong>13.46 ms</strong></td><td><span class='badge'>Current System Default</span></td></tr><tr><td><strong>🥈 2</strong></td><td><strong>Local Gateway (192.168.1.1)</strong></td><td><code class='font-mono'>192.168.1.1</code><button class='copy-ip-btn' onclick='copyText(&quot;192.168.1.1&quot;)'>📋</button></td><td style='color:var(--accent-green)'><strong>14.57 ms</strong></td><td><span class='badge'>Local Router Cache (Fastest)</span></td></tr><tr><td><strong>🥉 3</strong></td><td><strong>Google</strong></td><td><code class='font-mono'>8.8.8.8</code><button class='copy-ip-btn' onclick='copyText(&quot;8.8.8.8&quot;)'>📋</button></td><td style='color:var(--accent-green)'><strong>47.28 ms</strong></td><td><span class='badge'>Global Anycast Reliability</span></td></tr><tr><td><strong>#4</strong></td><td><strong>Quad9</strong></td><td><code class='font-mono'>9.9.9.9</code><button class='copy-ip-btn' onclick='copyText(&quot;9.9.9.9&quot;)'>📋</button></td><td style='color:var(--accent-green)'><strong>55.14 ms</strong></td><td><span class='badge'>Malware &amp; Phishing Threat Blocking</span></td></tr><tr><td><strong>#5</strong></td><td><strong>Cloudflare</strong></td><td><code class='font-mono'>1.1.1.1</code><button class='copy-ip-btn' onclick='copyText(&quot;1.1.1.1&quot;)'>📋</button></td><td style='color:var(--accent-green)'><strong>62.31 ms</strong></td><td><span class='badge'>Ultra-Fast &amp; Privacy (No Logs)</span></td></tr></tbody>
+                <tbody><tr><td><strong>🥇 1</strong></td><td><strong>Local Gateway (192.168.1.1)</strong></td><td><code class='font-mono'>192.168.1.1</code><button class='copy-ip-btn' onclick='copyText(&quot;192.168.1.1&quot;)'>📋</button></td><td style='color:var(--accent-green)'><strong>16.86 ms</strong></td><td><span class='badge'>Local Router Cache (Fastest)</span></td></tr><tr><td><strong>🥈 2</strong></td><td><strong>System DNS (fd8b:88ea:d899:1::1)</strong></td><td><code class='font-mono'>fd8b:88ea:d899:1::1</code><button class='copy-ip-btn' onclick='copyText(&quot;fd8b:88ea:d899:1::1&quot;)'>📋</button></td><td style='color:var(--accent-green)'><strong>17.82 ms</strong></td><td><span class='badge'>Current System Default</span></td></tr><tr><td><strong>🥉 3</strong></td><td><strong>Google</strong></td><td><code class='font-mono'>8.8.8.8</code><button class='copy-ip-btn' onclick='copyText(&quot;8.8.8.8&quot;)'>📋</button></td><td style='color:var(--accent-green)'><strong>116.07 ms</strong></td><td><span class='badge'>Global Anycast Reliability</span></td></tr><tr><td><strong>#4</strong></td><td><strong>Quad9</strong></td><td><code class='font-mono'>9.9.9.9</code><button class='copy-ip-btn' onclick='copyText(&quot;9.9.9.9&quot;)'>📋</button></td><td style='color:var(--accent-green)'><strong>124.03 ms</strong></td><td><span class='badge'>Malware &amp; Phishing Threat Blocking</span></td></tr><tr><td><strong>#5</strong></td><td><strong>Cloudflare</strong></td><td><code class='font-mono'>1.1.1.1</code><button class='copy-ip-btn' onclick='copyText(&quot;1.1.1.1&quot;)'>📋</button></td><td style='color:var(--accent-green)'><strong>128.55 ms</strong></td><td><span class='badge'>Ultra-Fast &amp; Privacy (No Logs)</span></td></tr><tr><td><strong>#6</strong></td><td><strong>OpenDNS</strong></td><td><code class='font-mono'>208.67.222.222</code><button class='copy-ip-btn' onclick='copyText(&quot;208.67.222.222&quot;)'>📋</button></td><td style='color:var(--accent-green)'><strong>130.23 ms</strong></td><td><span class='badge'>Cisco Security &amp; Web Filtering</span></td></tr><tr><td><strong>#7</strong></td><td><strong>AdGuard</strong></td><td><code class='font-mono'>94.140.14.14</code><button class='copy-ip-btn' onclick='copyText(&quot;94.140.14.14&quot;)'>📋</button></td><td style='color:var(--accent-green)'><strong>382.54 ms</strong></td><td><span class='badge'>System-Wide Ad &amp; Tracker Blocking</span></td></tr></tbody>
             </table>
 
             <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.35); border-radius: 16px; padding: 20px; margin-top: 24px;">
                 <div style="font-weight: 800; font-size: 16px; margin-bottom: 8px; color: var(--accent-purple);">
                     🏆 Recommended DNS Configurations for Your Network
                 </div>
-                <p style="margin: 0 0 16px 0; color: var(--text-dim); font-size: 14px;">Your current System/Gateway DNS (fd8b:88ea:d899:1::1) is already delivering optimal latency (13.5 ms avg)! Fastest public alternative: Google (8.8.8.8).</p>
+                <p style="margin: 0 0 16px 0; color: var(--text-dim); font-size: 14px;">Your current System/Gateway DNS (192.168.1.1) is already delivering optimal latency (16.9 ms avg)! Fastest public alternative: Google (8.8.8.8).</p>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px;">
                     <div style="background: var(--card-bg); border: 1px solid rgba(139, 92, 246, 0.4); padding: 16px; border-radius: 12px;">
                         <strong style="color:var(--accent-purple)">🚀 Best for Speed & Privacy</strong><br>
@@ -403,16 +403,16 @@
                 <thead>
                     <tr><th>Date / Time</th><th>Max Download</th><th>Ping</th><th>Bufferbloat</th><th>Quality Score</th></tr>
                 </thead>
-                <tbody><tr><td>2026-10-04 11:44</td><td><strong>66.7 Mbps</strong></td><td>100.1 ms</td><td><span class='badge'>A+</span></td><td><strong>62.0/100</strong></td></tr><tr><td>2026-10-04 11:49</td><td><strong>88.0 Mbps</strong></td><td>122.2 ms</td><td><span class='badge'>A+</span></td><td><strong>57.5/100</strong></td></tr><tr><td>2026-10-04 11:49</td><td><strong>118.2 Mbps</strong></td><td>69.2 ms</td><td><span class='badge'>A</span></td><td><strong>87.8/100</strong></td></tr><tr><td>2026-10-04 11:50</td><td><strong>104.4 Mbps</strong></td><td>134.4 ms</td><td><span class='badge'>A+</span></td><td><strong>51.8/100</strong></td></tr><tr><td>2026-10-04 11:53</td><td><strong>103.0 Mbps</strong></td><td>133.8 ms</td><td><span class='badge'>A+</span></td><td><strong>63.8/100</strong></td></tr><tr><td>2026-10-04 11:53</td><td><strong>0.0 Mbps</strong></td><td>111.8 ms</td><td><span class='badge'>A+</span></td><td><strong>22.0/100</strong></td></tr><tr><td>2026-10-04 11:56</td><td><strong>43.2 Mbps</strong></td><td>429.9 ms</td><td><span class='badge'>A+</span></td><td><strong>54.0/100</strong></td></tr><tr><td>2026-10-04 11:57</td><td><strong>23.9 Mbps</strong></td><td>180.6 ms</td><td><span class='badge'>A+</span></td><td><strong>45.2/100</strong></td></tr><tr><td>2026-10-04 11:58</td><td><strong>38.1 Mbps</strong></td><td>76.8 ms</td><td><span class='badge'>C</span></td><td><strong>79.0/100</strong></td></tr><tr><td>2026-10-04 11:58</td><td><strong>74.3 Mbps</strong></td><td>65.6 ms</td><td><span class='badge'>B</span></td><td><strong>76.5/100</strong></td></tr></tbody>
+                <tbody><tr><td>2026-10-04 11:50</td><td><strong>104.4 Mbps</strong></td><td>134.4 ms</td><td><span class='badge'>A+</span></td><td><strong>51.8/100</strong></td></tr><tr><td>2026-10-04 11:53</td><td><strong>103.0 Mbps</strong></td><td>133.8 ms</td><td><span class='badge'>A+</span></td><td><strong>63.8/100</strong></td></tr><tr><td>2026-10-04 11:53</td><td><strong>0.0 Mbps</strong></td><td>111.8 ms</td><td><span class='badge'>A+</span></td><td><strong>22.0/100</strong></td></tr><tr><td>2026-10-04 11:56</td><td><strong>43.2 Mbps</strong></td><td>429.9 ms</td><td><span class='badge'>A+</span></td><td><strong>54.0/100</strong></td></tr><tr><td>2026-10-04 11:57</td><td><strong>23.9 Mbps</strong></td><td>180.6 ms</td><td><span class='badge'>A+</span></td><td><strong>45.2/100</strong></td></tr><tr><td>2026-10-04 11:58</td><td><strong>38.1 Mbps</strong></td><td>76.8 ms</td><td><span class='badge'>C</span></td><td><strong>79.0/100</strong></td></tr><tr><td>2026-10-04 11:58</td><td><strong>74.3 Mbps</strong></td><td>65.6 ms</td><td><span class='badge'>B</span></td><td><strong>76.5/100</strong></td></tr><tr><td>2026-10-04 11:59</td><td><strong>50.9 Mbps</strong></td><td>70.9 ms</td><td><span class='badge'>C</span></td><td><strong>87.0/100</strong></td></tr><tr><td>2026-10-04 12:42</td><td><strong>75.7 Mbps</strong></td><td>90.3 ms</td><td><span class='badge'>A+</span></td><td><strong>69.0/100</strong></td></tr><tr><td>2026-10-04 12:51</td><td><strong>93.2 Mbps</strong></td><td>49.7 ms</td><td><span class='badge'>C</span></td><td><strong>90.5/100</strong></td></tr></tbody>
             </table>
         </div>
         
     </div>
 
     <script>
-        const REPORT_TS = "2026-10-04 11:58:39";
+        const REPORT_TS = "2026-10-04 12:51:17";
         const REPORT_TIER = "Standard Broadband";
-        const rawBenchmarkData = {"timestamp": "2026-10-04T11:58:39.059618", "version": "3.2.0", "network": {"lan_ip": "192.168.1.164", "lan_ipv6": "Unavailable", "geo": {"ip": "24.138.182.29", "ipv6": "Unavailable", "isp": "EastLink", "org": "PERSONA COMMUNICATIONS INC.", "city": "Minto", "country": "Canada", "country_code": "CA"}, "adapter": {"interface": "wlan0", "gateway": "192.168.1.1", "link_speed": "864.8 MBit/s", "interface_type": "Wi-Fi", "wifi_ssid": "RCMP_mobile", "wifi_signal": "-51 dBm", "wifi_frequency": "5745 MHz (5 GHz)", "wifi_channel": "N/A", "mtu": "1500"}}, "statistics": {"speedtest_download_mbps": {"min": 37.01, "max": 117.2, "avg": 69.86, "median": 55.36}, "speedtest_upload_mbps": {"min": 10.77, "max": 15.55, "avg": 12.81, "median": 12.11}, "fast_download_mbps": {"min": 53.01, "max": 103.48, "avg": 71.37, "median": 57.61}, "cloudflare_download_mbps": {"min": 67.66, "max": 79.17, "avg": 74.28, "median": 76.01}, "cloudflare_upload_mbps": {"min": 7.04, "max": 13.0, "avg": 9.18, "median": 7.51}, "custom_download_mbps": {"min": 0.0, "max": 0.0, "avg": 0.0, "median": 0.0}, "ping_ms": {"min": 43.95, "max": 94.42, "avg": 65.63, "median": 58.52}, "jitter_ms": 32.52, "packet_loss_pct": 0.0, "bufferbloat": {"grade": "B", "delta_ms": 18.17, "unloaded_ping_ms": 65.63, "download_loaded_ping_ms": 83.8, "download_delta_ms": 18.17, "download_grade": "B", "upload_loaded_ping_ms": 60.55, "upload_delta_ms": 0.0, "upload_grade": "A+", "loaded_ping_ms": 83.8}}, "suitability": {"overall_score": 76.5, "speed_tier": "Standard Broadband", "gaming": {"score": 55.0, "status": "Fair (Occasional Latency Spikes)"}, "streaming": {"score": 95, "status": "Flawless (Multi-Device 4K/8K HDR)"}, "video_call": {"score": 80.0, "status": "Good (Reliable HD Group Calls)"}}, "dns_recommendation": {"name": "Google", "ip": "8.8.8.8", "primary": "8.8.8.8", "secondary": "8.8.4.4", "ipv6_primary": "2001:4860:4860::8888", "ipv6_secondary": "2001:4860:4860::8844", "latency_ms": 47.28, "savings_pct": 0.0, "features": "Global anycast stability, high reliability", "status_message": "Your current System/Gateway DNS (fd8b:88ea:d899:1::1) is already delivering optimal latency (13.5 ms avg)! Fastest public alternative: Google (8.8.8.8).", "is_optimal": true, "leaderboard": [{"rank": 1, "name": "System DNS (fd8b:88ea:d899:1::1)", "ip": "fd8b:88ea:d899:1::1", "latency_ms": 13.46, "category": "Current System Default"}, {"rank": 2, "name": "Local Gateway (192.168.1.1)", "ip": "192.168.1.1", "latency_ms": 14.57, "category": "Local Router Cache (Fastest)"}, {"rank": 3, "name": "Google", "ip": "8.8.8.8", "latency_ms": 47.28, "category": "Global Anycast Reliability"}, {"rank": 4, "name": "Quad9", "ip": "9.9.9.9", "latency_ms": 55.14, "category": "Malware \u0026 Phishing Threat Blocking"}, {"rank": 5, "name": "Cloudflare", "ip": "1.1.1.1", "latency_ms": 62.31, "category": "Ultra-Fast \u0026 Privacy (No Logs)"}], "profiles": {"best_speed_privacy": {"name": "Cloudflare", "primary": "1.1.1.1", "secondary": "1.0.0.1", "ipv6_primary": "2606:4700:4700::1111", "latency_ms": 62.31, "rank": 5, "features": "Fastest response time, strict privacy (no logging)"}, "best_security": {"name": "Quad9", "primary": "9.9.9.9", "secondary": "149.112.112.112", "ipv6_primary": "2620:fe::fe", "latency_ms": 55.14, "rank": 4, "features": "Automatic malware, phishing \u0026 ransomware blocking"}, "best_adblocking": {"name": "AdGuard", "primary": "94.140.14.14", "secondary": "94.140.15.15", "ipv6_primary": "2a10:50c0::ad1:ff", "latency_ms": null, "rank": null, "features": "System-wide ad, tracker, and malware blocking"}, "best_reliability": {"name": "Google", "primary": "8.8.8.8", "secondary": "8.8.4.4", "ipv6_primary": "2001:4860:4860::8888", "latency_ms": 47.28, "rank": 3, "features": "Global anycast stability, high reliability"}}, "system_dns_name": "System DNS (fd8b:88ea:d899:1::1)", "system_dns_latency": 13.46, "slowest_name": "Cloudflare", "slowest_latency_ms": 62.31}, "dns": {"dns_resolvers": {"System DNS (fd8b:88ea:d899:1::1)": {"resolver_ip": "fd8b:88ea:d899:1::1", "queries": 13, "latency_ms": {"min": 7.01, "max": 26.98, "avg": 13.46, "median": 9.53}}, "Local Gateway (192.168.1.1)": {"resolver_ip": "192.168.1.1", "queries": 13, "latency_ms": {"min": 7.18, "max": 30.2, "avg": 14.57, "median": 11.04}}, "Google": {"resolver_ip": "8.8.8.8", "queries": 13, "latency_ms": {"min": 22.56, "max": 112.47, "avg": 47.28, "median": 32.5}}, "Quad9": {"resolver_ip": "9.9.9.9", "queries": 13, "latency_ms": {"min": 23.0, "max": 112.28, "avg": 55.14, "median": 30.96}}, "Cloudflare": {"resolver_ip": "1.1.1.1", "queries": 12, "latency_ms": {"min": 25.56, "max": 122.05, "avg": 62.31, "median": 72.07}}}, "doh_resolvers": {"Cloudflare (DoH)": {"url": "https://cloudflare-dns.com/dns-query", "latency_ms": {"min": 169.48, "max": 310.06, "avg": 238.3, "median": 236.84}}, "Google (DoH)": {"url": "https://dns.google/resolve", "latency_ms": {"min": 206.07, "max": 415.52, "avg": 277.88, "median": 244.97}}}, "overall_latency_ms": {"min": 7.01, "max": 122.05, "avg": 38.18, "median": 27.0}, "total_queries": 64}, "raw_results": {"speedtest": [{"ping": 94.42, "jitter": null, "download": 55.36, "upload": 10.77, "engine_type": "speedtest-cli"}, {"ping": 43.948, "jitter": null, "download": 117.2, "upload": 15.55, "engine_type": "speedtest-cli"}, {"ping": 58.518, "jitter": null, "download": 37.01, "upload": 12.11, "engine_type": "speedtest-cli"}], "fast": [{"download": 103.48}, {"download": 53.01}, {"download": 57.61}], "cloudflare": [{"download": 76.01, "upload": 7.51}, {"download": 67.66, "upload": 7.04}, {"download": 79.17, "upload": 13.0}], "custom": []}};
+        const rawBenchmarkData = {"timestamp": "2026-10-04T12:51:17.889687", "version": "3.2.0", "network": {"lan_ip": "192.168.1.164", "lan_ipv6": "Unavailable", "geo": {"ip": "24.138.182.29", "ipv6": "Unavailable", "isp": "EastLink", "org": "PERSONA COMMUNICATIONS INC.", "city": "Minto", "country": "Canada", "country_code": "CA"}, "adapter": {"interface": "wlan0", "gateway": "192.168.1.1", "link_speed": "864.8 MBit/s", "interface_type": "Wi-Fi", "wifi_ssid": "RCMP_mobile", "wifi_signal": "-48 dBm", "wifi_frequency": "5745 MHz (5 GHz)", "wifi_channel": "N/A", "mtu": "1500"}}, "statistics": {"speedtest_download_mbps": {"min": 56.69, "max": 86.87, "avg": 66.75, "median": 56.7}, "speedtest_upload_mbps": {"min": 12.04, "max": 12.63, "avg": 12.24, "median": 12.05}, "fast_download_mbps": {"min": 69.13, "max": 118.67, "avg": 93.24, "median": 91.92}, "cloudflare_download_mbps": {"min": 43.96, "max": 73.22, "avg": 60.83, "median": 65.31}, "cloudflare_upload_mbps": {"min": 7.26, "max": 8.0, "avg": 7.69, "median": 7.82}, "custom_download_mbps": {"min": 0.0, "max": 0.0, "avg": 0.0, "median": 0.0}, "ping_ms": {"min": 45.87, "max": 56.7, "avg": 49.74, "median": 46.65}, "jitter_ms": 5.8, "packet_loss_pct": 0.0, "bufferbloat": {"grade": "C", "delta_ms": 33.31, "unloaded_ping_ms": 49.74, "download_loaded_ping_ms": 83.05, "download_delta_ms": 33.31, "download_grade": "C", "upload_loaded_ping_ms": 67.52, "upload_delta_ms": 17.78, "upload_grade": "B", "loaded_ping_ms": 83.05}}, "suitability": {"overall_score": 90.5, "speed_tier": "Standard Broadband", "gaming": {"score": 78.0, "status": "Good (Smooth Casual Gaming)"}, "streaming": {"score": 95, "status": "Flawless (Multi-Device 4K/8K HDR)"}, "video_call": {"score": 100.0, "status": "Studio Quality (Flawless HD/4K Calls)"}}, "dns_recommendation": {"name": "Google", "ip": "8.8.8.8", "primary": "8.8.8.8", "secondary": "8.8.4.4", "ipv6_primary": "2001:4860:4860::8888", "ipv6_secondary": "2001:4860:4860::8844", "latency_ms": 116.07, "savings_pct": 0.0, "features": "Global anycast stability, high reliability", "status_message": "Your current System/Gateway DNS (192.168.1.1) is already delivering optimal latency (16.9 ms avg)! Fastest public alternative: Google (8.8.8.8).", "is_optimal": true, "leaderboard": [{"rank": 1, "name": "Local Gateway (192.168.1.1)", "ip": "192.168.1.1", "latency_ms": 16.86, "category": "Local Router Cache (Fastest)"}, {"rank": 2, "name": "System DNS (fd8b:88ea:d899:1::1)", "ip": "fd8b:88ea:d899:1::1", "latency_ms": 17.82, "category": "Current System Default"}, {"rank": 3, "name": "Google", "ip": "8.8.8.8", "latency_ms": 116.07, "category": "Global Anycast Reliability"}, {"rank": 4, "name": "Quad9", "ip": "9.9.9.9", "latency_ms": 124.03, "category": "Malware \u0026 Phishing Threat Blocking"}, {"rank": 5, "name": "Cloudflare", "ip": "1.1.1.1", "latency_ms": 128.55, "category": "Ultra-Fast \u0026 Privacy (No Logs)"}, {"rank": 6, "name": "OpenDNS", "ip": "208.67.222.222", "latency_ms": 130.23, "category": "Cisco Security \u0026 Web Filtering"}, {"rank": 7, "name": "AdGuard", "ip": "94.140.14.14", "latency_ms": 382.54, "category": "System-Wide Ad \u0026 Tracker Blocking"}], "profiles": {"best_speed_privacy": {"name": "Cloudflare", "primary": "1.1.1.1", "secondary": "1.0.0.1", "ipv6_primary": "2606:4700:4700::1111", "latency_ms": 128.55, "rank": 5, "features": "Fastest response time, strict privacy (no logging)"}, "best_security": {"name": "Quad9", "primary": "9.9.9.9", "secondary": "149.112.112.112", "ipv6_primary": "2620:fe::fe", "latency_ms": 124.03, "rank": 4, "features": "Automatic malware, phishing \u0026 ransomware blocking"}, "best_adblocking": {"name": "AdGuard", "primary": "94.140.14.14", "secondary": "94.140.15.15", "ipv6_primary": "2a10:50c0::ad1:ff", "latency_ms": 382.54, "rank": 7, "features": "System-wide ad, tracker, and malware blocking"}, "best_reliability": {"name": "Google", "primary": "8.8.8.8", "secondary": "8.8.4.4", "ipv6_primary": "2001:4860:4860::8888", "latency_ms": 116.07, "rank": 3, "features": "Global anycast stability, high reliability"}}, "system_dns_name": "Local Gateway (192.168.1.1)", "system_dns_latency": 16.86, "slowest_name": "AdGuard", "slowest_latency_ms": 382.54}, "dns": {"dns_resolvers": {"Local Gateway (192.168.1.1)": {"resolver_ip": "192.168.1.1", "queries": 13, "latency_ms": {"min": 6.48, "max": 68.9, "avg": 16.86, "median": 11.93}}, "System DNS (fd8b:88ea:d899:1::1)": {"resolver_ip": "fd8b:88ea:d899:1::1", "queries": 13, "latency_ms": {"min": 6.47, "max": 68.5, "avg": 17.82, "median": 12.08}}, "Google": {"resolver_ip": "8.8.8.8", "queries": 13, "latency_ms": {"min": 35.46, "max": 405.81, "avg": 116.07, "median": 68.77}}, "Quad9": {"resolver_ip": "9.9.9.9", "queries": 13, "latency_ms": {"min": 29.23, "max": 406.01, "avg": 124.03, "median": 96.64}}, "Cloudflare": {"resolver_ip": "1.1.1.1", "queries": 13, "latency_ms": {"min": 31.55, "max": 405.96, "avg": 128.55, "median": 96.63}}, "OpenDNS": {"resolver_ip": "208.67.222.222", "queries": 13, "latency_ms": {"min": 37.69, "max": 405.89, "avg": 130.23, "median": 96.83}}, "AdGuard": {"resolver_ip": "94.140.14.14", "queries": 13, "latency_ms": {"min": 119.73, "max": 2905.78, "avg": 382.54, "median": 149.79}}}, "doh_resolvers": {"Cloudflare (DoH)": {"url": "https://cloudflare-dns.com/dns-query", "latency_ms": {"min": 88.28, "max": 188.57, "avg": 130.29, "median": 122.16}}, "Google (DoH)": {"url": "https://dns.google/resolve", "latency_ms": {"min": 111.03, "max": 179.85, "avg": 144.25, "median": 143.06}}}, "overall_latency_ms": {"min": 6.47, "max": 2905.78, "avg": 130.87, "median": 79.31}, "total_queries": 91}, "site_timings": null, "traceroutes": null, "raw_results": {"speedtest": [{"ping": 56.699, "jitter": null, "download": 56.69, "upload": 12.05, "engine_type": "speedtest-cli"}, {"ping": 45.872, "jitter": null, "download": 86.87, "upload": 12.04, "engine_type": "speedtest-cli"}, {"ping": 46.649, "jitter": null, "download": 56.7, "upload": 12.63, "engine_type": "speedtest-cli"}], "fast": [{"download": 91.92}, {"download": 118.67}, {"download": 69.13}], "cloudflare": [{"download": 73.22, "upload": 7.26}, {"download": 65.31, "upload": 7.82}, {"download": 43.96, "upload": 8.0}], "custom": []}};
 
         function showToast(msg) {
             const t = document.getElementById('toast');
@@ -438,8 +438,8 @@
         } catch(e) {}
 
         function copySummary() {
-            const ulStr = "12.81 Mbps";
-            const summary = `🚀 Network Speed Benchmark Report\n📅 Date: ${REPORT_TS}\n⚡ Max Download: 74.28 Mbps | Upload: ${ulStr}\n📶 Ping: 65.63 ms | Jitter: 32.52 ms | Loss: 0.0%\n🛡️ Bufferbloat: B (+18.17ms)\n⭐ Quality Score: 76.5/100 (${REPORT_TIER})`;
+            const ulStr = "12.24 Mbps";
+            const summary = `🚀 Network Speed Benchmark Report\n📅 Date: ${REPORT_TS}\n⚡ Max Download: 93.24 Mbps | Upload: ${ulStr}\n📶 Ping: 49.74 ms | Jitter: 5.8 ms | Loss: 0.0%\n🛡️ Bufferbloat: C (+33.31ms)\n⭐ Quality Score: 90.5/100 (${REPORT_TIER})`;
             navigator.clipboard.writeText(summary).then(() => showToast('Summary copied to clipboard!'));
         }
 

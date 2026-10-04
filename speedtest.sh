@@ -34,6 +34,25 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+# Popular sites for per-phase reachability timing (traceroute-style diagnostics).
+# Each entry is probed for DNS / TCP / TLS / TTFB timings to answer
+# "which part of reaching this site is slow for me?".
+SITE_TIMING_TARGETS = [
+    {"name": "YouTube", "host": "www.youtube.com"},
+    {"name": "Google", "host": "www.google.com"},
+    {"name": "Amazon", "host": "www.amazon.com"},
+    {"name": "Netflix", "host": "www.netflix.com"},
+    {"name": "Cloudflare", "host": "www.cloudflare.com"},
+    {"name": "Microsoft", "host": "www.microsoft.com"},
+    {"name": "Apple", "host": "www.apple.com"},
+    {"name": "GitHub", "host": "github.com"},
+]
+
+SITE_TIMING_WORKERS = 8
+SITE_TIMING_RUNS = 3
+TRACEROUTE_DEFAULT_MAX_HOPS = 20
+TRACEROUTE_MAX_HOPS = 64
+
 # --- Version & Constants ---
 VERSION = "3.2.0"
 MAX_RETRIES = 2
@@ -698,6 +717,62 @@ def print_dns_leaderboard(dns_rec: Dict[str, Any], width: int = 76) -> None:
     else:
         print(f"  • {C.BOLD}⚡ Current Status:{C.RESET} {C.YELLOW}Switching to {speed_prof.get('name')} will speed up lookups by {dns_rec.get('savings_pct')}%!{C.RESET}")
     print(f"{C.CYAN}{C.BOLD}{top_bar}{C.RESET}\n")
+
+
+def print_site_timing_table(results: List[Dict[str, Any]], width: int = 76) -> None:
+    """Print a per-site DNS/TCP/TLS/TTFB timing table."""
+    if not results:
+        return
+    h_line = "─" * width
+    print(f"\n{C.CYAN}{C.BOLD}{'SITE REACHABILITY TIMING (median of N runs)':^{width}}{C.RESET}")
+    print(f"{C.CYAN}{C.DIM}{h_line}{C.RESET}")
+    print(f"  {C.BOLD}{'Site':<12} {'DNS':>7} {'TCP':>7} {'TLS':>7} {'Server':>8} {'TTFB':>8} {'Total':>8}  Status{C.RESET}")
+    print(f"  {C.DIM}{h_line}{C.RESET}")
+
+    for r in results:
+        name = str(r.get("name", "?"))[:12]
+        if not r.get("reachable"):
+            print(f"  {name:<12} {'-':>7} {'-':>7} {'-':>7} {'-':>8} {'-':>8} {'-':>8}  {C.RED}Unreachable{C.RESET}")
+            continue
+
+        total = r.get("total_ms", 0.0)
+        if total <= 0:
+            color, status = C.RED, "No data"
+        elif total < 300:
+            color, status = C.GREEN, "Excellent"
+        elif total < 800:
+            color, status = C.YELLOW, "Fair"
+        else:
+            color, status = C.RED, "Slow"
+        code = r.get("http_code", 0)
+        code_note = f"HTTP {code}" if code else ""
+        print(f"  {name:<12} {r.get('dns_ms', 0):>6.1f}m {r.get('tcp_ms', 0):>6.1f}m "
+              f"{r.get('tls_ms', 0):>6.1f}m {r.get('server_ms', 0):>7.1f}m "
+              f"{r.get('ttfb_ms', 0):>7.1f}m {color}{total:>7.1f}m{C.RESET}  "
+              f"{color}{status}{C.RESET} {C.DIM}{code_note}{C.RESET}")
+    print(f"{C.CYAN}{C.DIM}{h_line}{C.RESET}")
+
+
+def print_traceroute(trace: Dict[str, Any], width: int = 76) -> None:
+    """Print a hop-by-hop path trace."""
+    if not trace:
+        return
+    print(f"\n{C.MAGENTA}{C.BOLD}{'HOP-BY-HOP PATH TRACE':^{width}}{C.RESET}")
+    print(f"{C.MAGENTA}{C.DIM}{'─' * width}{C.RESET}")
+    for hop in trace.get("hops", []):
+        num = hop.get("hop")
+        if hop.get("timeout") or hop.get("rtt_ms") is None:
+            print(f"  {C.YELLOW}{num:>2}{C.RESET}  {C.DIM}* * *  (no reply){C.RESET}")
+            continue
+        rtt = hop["rtt_ms"]
+        color = C.GREEN if rtt < 30 else (C.YELLOW if rtt < 100 else C.RED)
+        print(f"  {C.BOLD}{num:>2}{C.RESET}  {str(hop.get('ip') or '?'):<40} {color}{rtt:>8.2f} ms{C.RESET}")
+    summary = (f"  {trace.get('responding_hops', 0)}/{trace.get('hop_count', 0)} hops responded"
+               f" via {trace.get('tool', '?')}")
+    if trace.get("timeout_hops"):
+        summary += f" {C.DIM}({trace['timeout_hops']} no-reply){C.RESET}"
+    print(f"{C.MAGENTA}{C.DIM}{'─' * width}{C.RESET}")
+    print(f"{C.DIM}{summary}{C.RESET}")
 
 
 def measure_idle_ping(
@@ -1518,6 +1593,246 @@ def get_custom_speedtest(server_url: str, debug: bool = False, retries: int = MA
             if attempt < retries:
                 exponential_backoff_delay(attempt)
     return None
+
+
+def probe_site_timing(host: str, timeout: int = HTTP_TIMEOUT, ip_version: Optional[str] = None, debug: bool = False) -> Optional[Dict[str, Any]]:
+    """Measure per-phase connection timings to a host using a single HTTPS GET.
+
+    Returns DNS / TCP / TLS / TTFB / total times in milliseconds, or None if the
+    host could not be reached. Requires no special privileges (unlike traceroute).
+    """
+    fmt = ("%{time_namelookup}|%{time_connect}|%{time_appconnect}|%{time_starttransfer}"
+           "|%{time_total}|%{remote_ip}|%{http_code}|%{time_redirect}")
+    cmd = ["curl", "-s", "-o", "/dev/null", "-A", USER_AGENT,
+           "--connect-timeout", str(timeout), "--max-time", str(timeout), "-w", fmt]
+    if ip_version == "4":
+        cmd.append("-4")
+    elif ip_version == "6":
+        cmd.append("-6")
+    cmd.append(f"https://{host}/")
+
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 3)
+        out = (res.stdout or "").strip()
+        if res.returncode != 0 or "|" not in out:
+            if debug:
+                err = (res.stderr or "").strip()[:120]
+                print(f"{C.YELLOW}[DEBUG] Site timing failed for {host} (curl rc={res.returncode}): {err}{C.RESET}")
+            return None
+        parts = out.split("|")
+        if len(parts) < 7:
+            return None
+
+        def secs_to_ms(v: str) -> float:
+            try:
+                return round(float(v) * 1000.0, 2)
+            except (TypeError, ValueError):
+                return 0.0
+
+        dns_ms = secs_to_ms(parts[0])
+        tcp_ms = secs_to_ms(parts[1])
+        tls_ms = secs_to_ms(parts[2])
+        ttfb_ms = secs_to_ms(parts[3])
+        total_ms = secs_to_ms(parts[4])
+        remote_ip = parts[5].strip()
+        try:
+            http_code = int(parts[6] or 0)
+        except ValueError:
+            http_code = 0
+        redirect_ms = secs_to_ms(parts[7]) if len(parts) > 7 else 0.0
+
+        if http_code == 0 or total_ms <= 0:
+            return None
+
+        return {
+            "host": host,
+            "remote_ip": remote_ip,
+            "http_code": http_code,
+            "dns_ms": dns_ms,
+            "tcp_ms": round(tcp_ms - dns_ms, 2) if tcp_ms > dns_ms else 0.0,
+            "tls_ms": round(tls_ms - tcp_ms, 2) if tls_ms > tcp_ms else 0.0,
+            "server_ms": round(ttfb_ms - tls_ms, 2) if ttfb_ms > tls_ms else 0.0,
+            "ttfb_ms": ttfb_ms,
+            "total_ms": total_ms,
+            "redirect_ms": redirect_ms,
+        }
+    except subprocess.TimeoutExpired:
+        if debug:
+            print(f"{C.YELLOW}[DEBUG] Site timing timed out for {host}{C.RESET}")
+    except Exception as e:
+        if debug:
+            print(f"{C.YELLOW}[DEBUG] Unexpected site timing error for {host}: {e}{C.RESET}")
+    return None
+
+
+def run_site_timing_test(
+    targets: Optional[List[Dict[str, str]]] = None,
+    runs: int = SITE_TIMING_RUNS,
+    quiet: bool = False,
+    debug: bool = False,
+    ip_version: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Probe popular sites in parallel and return per-target timing summaries."""
+    targets = targets or SITE_TIMING_TARGETS
+    runs = max(1, runs)
+
+    def probe_target(t: Dict[str, str]) -> Dict[str, Any]:
+        samples: List[Dict[str, Any]] = []
+        for _ in range(runs):
+            probe = probe_site_timing(t["host"], timeout=HTTP_TIMEOUT, ip_version=ip_version, debug=debug)
+            if probe:
+                samples.append(probe)
+        return {"name": t["name"], "host": t["host"], "samples": samples}
+
+    results: List[Dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=min(max(len(targets), 1), SITE_TIMING_WORKERS)) as ex:
+        for res in ex.map(probe_target, targets):
+            results.append(res)
+
+    # Summarize each target: median resists a single slow sample skewing the result.
+    summary: List[Dict[str, Any]] = []
+    for r in results:
+        samples = r["samples"]
+        entry: Dict[str, Any] = {"name": r["name"], "host": r["host"], "reachable": bool(samples)}
+        entry["samples"] = len(samples)
+        entry["loss_pct"] = round(((runs - len(samples)) / runs) * 100.0, 1)
+        if samples:
+            entry["remote_ip"] = samples[-1].get("remote_ip", "")
+            entry["http_code"] = samples[-1].get("http_code", 0)
+            for field in ("dns_ms", "tcp_ms", "tls_ms", "server_ms", "ttfb_ms", "total_ms"):
+                entry[field] = calculate_statistics([s[field] for s in samples])["median"]
+        summary.append(entry)
+
+    if not quiet:
+        reachable = sum(1 for s in summary if s["reachable"])
+        print(f"  {C.DIM}Probed {len(summary)} targets ({reachable} reachable, {runs} run(s) each){C.RESET}")
+    return summary
+
+
+def find_traceroute_command() -> Optional[Tuple[List[str], str]]:
+    """Locate a hop-by-hop traceroute implementation.
+
+    Returns (base command, tool name) or None when neither traceroute nor
+    tracepath is installed. Raw-socket probing needs privileges, so we shell
+    out rather than implementing TTL expiry ourselves.
+    """
+    for binary, tool in (("traceroute", "traceroute"), ("tracepath", "tracepath")):
+        path = shutil.which(binary)
+        if path:
+            return [path], tool
+    return None
+
+
+def parse_traceroute_output(output: str, max_hops: int = TRACEROUTE_DEFAULT_MAX_HOPS) -> List[Dict[str, Any]]:
+    """Parse traceroute/tracepath output into structured hop records.
+
+    Handles the classic traceroute layout (" 2  10.0.0.1  1.2 ms  1.1 ms"), the
+    tracepath layout (" 2:  10.0.0.1   12.3ms"), and '*'/'?' no-reply hops.
+    """
+    hops: List[Dict[str, Any]] = []
+    seen: Dict[int, Dict[str, Any]] = {}
+
+    for line in (output or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = re.match(r"^(\d+):?[\s]+(.*)$", line)
+        if not m:
+            continue
+        try:
+            hop_num = int(m.group(1))
+        except ValueError:
+            continue
+        if hop_num < 1 or hop_num > max_hops:
+            continue
+        rest = m.group(2)
+        # tracepath emits a "pmtu"/"Resume" trailer that is not a hop measurement.
+        if re.search(r"pmtu|Resume|Too many hops", rest, re.IGNORECASE):
+            continue
+
+        rtts = [float(x) for x in re.findall(r"([0-9]+\.?[0-9]*)\s*ms", rest)]
+        ip_m = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3}|[0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){2,})\b", rest)
+        addr = ip_m.group(1) if ip_m else ""
+
+        entry = seen.get(hop_num)
+        if entry is None:
+            entry = {"hop": hop_num, "ip": addr or None, "rtt_ms": None, "timeout": True, "_rtts": []}
+            seen[hop_num] = entry
+        elif not entry["ip"] and addr:
+            entry["ip"] = addr
+        entry["_rtts"].extend(rtts)
+
+    for hop_num in sorted(seen):
+        entry = seen[hop_num]
+        samples = entry.pop("_rtts")
+        if samples:
+            entry["rtt_ms"] = round(sum(samples) / len(samples), 2)
+            entry["timeout"] = False
+        else:
+            entry["rtt_ms"] = None
+            entry["timeout"] = True
+        hops.append(entry)
+    return hops
+
+
+def run_traceroute(
+    host: str,
+    max_hops: int = TRACEROUTE_DEFAULT_MAX_HOPS,
+    quiet: bool = False,
+    debug: bool = False,
+    ip_version: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Run a hop-by-hop path trace to `host` using the system traceroute tool."""
+    found = find_traceroute_command()
+    if not found:
+        if debug:
+            print(f"{C.YELLOW}[DEBUG] Neither traceroute nor tracepath installed; skipping hop trace for {host}{C.RESET}")
+        return None
+
+    base_cmd, tool = found
+    cmd = list(base_cmd)
+    if tool == "tracepath":
+        cmd += ["-n", "-m", str(max_hops)]
+        per_hop_budget = 6
+    else:
+        # traceroute: -n disables reverse DNS, -q 1 keeps it fast, -w bounds per-probe wait.
+        cmd += ["-n", "-q", "1", "-w", "2", "-m", str(max_hops)]
+        per_hop_budget = 3
+    if ip_version == "4":
+        cmd.append("-4")
+    elif ip_version == "6":
+        cmd.append("-6")
+    cmd.append(host)
+
+    # Unresponsive hops can stall a trace; bound the whole run generously but finitely.
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=max_hops * per_hop_budget + 10)
+    except subprocess.TimeoutExpired:
+        if debug:
+            print(f"{C.YELLOW}[DEBUG] traceroute timed out for {host}{C.RESET}")
+        return None
+    except Exception as e:
+        if debug:
+            print(f"{C.YELLOW}[DEBUG] traceroute failed for {host}: {e}{C.RESET}")
+        return None
+
+    hops = parse_traceroute_output(res.stdout, max_hops=max_hops)
+    if not hops:
+        if debug:
+            print(f"{C.YELLOW}[DEBUG] No hops parsed from {tool} output for {host}{C.RESET}")
+        return None
+
+    responding = [h for h in hops if h.get("rtt_ms") is not None]
+    return {
+        "host": host,
+        "tool": tool,
+        "hop_count": len(hops),
+        "responding_hops": len(responding),
+        "timeout_hops": len(hops) - len(responding),
+        "final_hop": hops[-1],
+        "max_rtt_ms": max((h["rtt_ms"] for h in responding), default=None),
+        "hops": hops,
+    }
 
 
 def ping_monitor(stop_event: threading.Event, ping_samples: List[float], host: Optional[str] = None, ip_version: Optional[str] = None):
@@ -2776,7 +3091,50 @@ def run_benchmark_cycle(args) -> int:
         if not getattr(args, "json_stdout", False) and not args.quiet and dns_rec:
             print_dns_leaderboard(dns_rec)
 
-    # 2. Display Historical Benchmark Results immediately after DNS test
+    # 2. Traceroute-style site reachability timing (opt-in via --traceroute).
+    # Strictly opt-in: only an explicit True enables real network probing, so a
+    # truthy-but-not-boolean flag value can never trigger these probes.
+    site_timings: List[Dict[str, Any]] = []
+    traceroute_results: List[Dict[str, Any]] = []
+    if getattr(args, "traceroute", False) is True:
+        if not args.quiet and not getattr(args, "json_stdout", False):
+            print(f"\n{C.CYAN}{C.BOLD}--- Measuring Site Reachability Timings ---{C.RESET}")
+        sp_trace = Spinner("Probing popular sites", quiet=args.quiet)
+        sp_trace.start()
+        try:
+            targets = SITE_TIMING_TARGETS
+            custom_trace_host = getattr(args, "trace_target", None)
+            if custom_trace_host:
+                targets = [{"name": "Custom", "host": custom_trace_host}]
+
+            site_timings = run_site_timing_test(
+                targets=targets,
+                runs=getattr(args, "trace_runs", SITE_TIMING_RUNS),
+                quiet=True,
+                debug=args.debug,
+                ip_version=ip_ver
+            )
+
+            # Hop-by-hop layer: only when a traceroute binary is actually available.
+            if find_traceroute_command():
+                max_hops = min(getattr(args, "trace_hops", TRACEROUTE_DEFAULT_MAX_HOPS), TRACEROUTE_MAX_HOPS)
+                trace_hosts = [custom_trace_host] if custom_trace_host else ["www.google.com", "www.amazon.com"]
+                for th in trace_hosts:
+                    trace = run_traceroute(th, max_hops=max_hops, quiet=True, debug=args.debug, ip_version=ip_ver)
+                    if trace:
+                        traceroute_results.append(trace)
+            sp_trace.stop(f"Site timing completed ({len(site_timings)} target(s)).")
+        except Exception as e:
+            sp_trace.stop(f"Site timing encountered an issue: {e}")
+
+        if not getattr(args, "json_stdout", False) and not args.quiet:
+            print_site_timing_table(site_timings)
+            for tr in traceroute_results:
+                print_traceroute(tr)
+            if site_timings and not find_traceroute_command():
+                print(f" {C.DIM}[i] Hop-by-hop tracing unavailable: install 'traceroute' or 'iputils-tracepath' for path traces.{C.RESET}")
+
+    # 3. Display Historical Benchmark Results immediately after DNS test
     if not getattr(args, "json_stdout", False) and not args.quiet:
         display_history(no_color=args.no_color, show_graph=True, inline=True)
 
@@ -2940,7 +3298,9 @@ def run_benchmark_cycle(args) -> int:
         },
         "suitability": suitability,
         "dns_recommendation": dns_rec,
-        "dns": dns_results
+        "dns": dns_results,
+        "site_timings": site_timings or None,
+        "traceroutes": traceroute_results or None,
     }
     save_history_record(record_data, args.debug)
 
@@ -3068,6 +3428,25 @@ def validate_args(args) -> Optional[str]:
         if value is not None and value <= 0:
             return f"{flag} must be greater than 0 (got: {value})"
 
+    hops = getattr(args, "trace_hops", None)
+    if hops is not None and (hops < 1 or hops > TRACEROUTE_MAX_HOPS):
+        return f"--trace-hops must be between 1 and {TRACEROUTE_MAX_HOPS} (got: {hops})"
+
+    trace_runs = getattr(args, "trace_runs", None)
+    if trace_runs is not None and (trace_runs < 1 or trace_runs > 10):
+        return f"--trace-runs must be between 1 and 10 (got: {trace_runs})"
+
+    trace_target = getattr(args, "trace_target", None)
+    if trace_target:
+        # Accept bare host or a full URL, but never a URL with an unsupported scheme.
+        candidate = trace_target if "://" in trace_target else f"http://{trace_target}"
+        scheme = urllib.parse.urlparse(candidate).scheme.lower()
+        if scheme not in ("http", "https"):
+            return f"--trace-target must be a hostname or http(s) URL (got: {trace_target})"
+        host = urllib.parse.urlparse(candidate).hostname
+        if not host:
+            return f"--trace-target has no hostname (got: {trace_target})"
+
     return None
 
 
@@ -3118,6 +3497,10 @@ def run_benchmark() -> int:
     parser.add_argument("--threshold-ul", type=float, metavar="MBPS", help="Minimum required upload speed (exits with code 3 if violated)")
     parser.add_argument("--threshold-ping", type=float, metavar="MS", help="Maximum acceptable ping latency (exits with code 3 if violated)")
     parser.add_argument("--monitor", type=int, metavar="MINS", help="Continuous monitoring mode interval in minutes")
+    parser.add_argument("--traceroute", action="store_true", help="Measure per-site DNS/TCP/TLS/TTFB timings (YouTube, Google, Amazon, etc.) plus hop-by-hop paths when a traceroute binary is available")
+    parser.add_argument("--trace-target", type=str, metavar="HOST", help="Probe only this host instead of the built-in popular-site list (implies timing data for it)")
+    parser.add_argument("--trace-hops", type=int, default=TRACEROUTE_DEFAULT_MAX_HOPS, metavar="N", help=f"Maximum hops for path traces (default: {TRACEROUTE_DEFAULT_MAX_HOPS}, max: {TRACEROUTE_MAX_HOPS})")
+    parser.add_argument("--trace-runs", type=int, default=SITE_TIMING_RUNS, metavar="N", help=f"Samples per site for median timing (default: {SITE_TIMING_RUNS}, max: 10)")
     parser.add_argument("--quiet", action="store_true", help="Suppress banner and live progress output")
     parser.add_argument("--no-color", action="store_true", help="Disable ANSI terminal colors")
     parser.add_argument("--debug", action="store_true", help="Enable debug logs for troubleshooting")
@@ -3126,6 +3509,16 @@ def run_benchmark() -> int:
 
     if getattr(args, "no_dns", False):
         args.dns = False
+
+    # --trace-target is only meaningful with the traceroute suite enabled.
+    if getattr(args, "trace_target", None):
+        args.traceroute = True
+
+        # Normalize a URL down to just the hostname for probing.
+        raw_target = args.trace_target
+        args.trace_target = urllib.parse.urlparse(
+            raw_target if "://" in raw_target else f"http://{raw_target}"
+        ).hostname or raw_target
 
     if getattr(args, "no_html", False):
         args.html = None

@@ -1309,12 +1309,16 @@ class TestSlaThresholdsAndExitCodes(unittest.TestCase):
         args.no_color = True
         args.server = None
         args.dns = False
+        args.traceroute = False
         args.ipv4 = False
         args.ipv6 = False
         args.timeout = 5
         args.threshold_dl = None
         args.threshold_ul = None
         args.threshold_ping = None
+        args.trace_hops = speedtest.TRACEROUTE_DEFAULT_MAX_HOPS
+        args.trace_runs = speedtest.SITE_TIMING_RUNS
+        args.trace_target = None
         for k, v in kwargs.items():
             setattr(args, k, v)
         return args
@@ -1417,6 +1421,242 @@ class TestSlaThresholdsAndExitCodes(unittest.TestCase):
         self.assertNotIn("SLA ALERT", out.getvalue())
 
 
+class TestSiteTiming(unittest.TestCase):
+    TIMING_CSV = "0.010000|0.050000|0.200000|0.300000|0.320000|93.184.216.34|200|0.000000"
+
+    def _mock_curl(self, stdout=None, returncode=0, stderr=""):
+        res = MagicMock()
+        res.returncode = returncode
+        res.stdout = stdout if stdout is not None else self.TIMING_CSV
+        res.stderr = stderr
+        return res
+
+    def test_probe_parses_phase_timings(self):
+        with patch("subprocess.run", return_value=self._mock_curl()):
+            probe = speedtest.probe_site_timing("www.youtube.com")
+        self.assertEqual(probe["host"], "www.youtube.com")
+        self.assertEqual(probe["remote_ip"], "93.184.216.34")
+        self.assertEqual(probe["http_code"], 200)
+        self.assertEqual(probe["dns_ms"], 10.0)
+        self.assertEqual(probe["tcp_ms"], 40.0)    # connect - namelookup
+        self.assertEqual(probe["tls_ms"], 150.0)   # appconnect - connect
+        self.assertEqual(probe["server_ms"], 100.0)  # starttransfer - appconnect
+        self.assertEqual(probe["ttfb_ms"], 300.0)
+        self.assertEqual(probe["total_ms"], 320.0)
+
+    def test_probe_passes_ip_version_flag(self):
+        with patch("subprocess.run", return_value=self._mock_curl()) as mock_run:
+            speedtest.probe_site_timing("example.com", ip_version="4")
+        self.assertIn("-4", mock_run.call_args[0][0])
+
+    def test_probe_uses_https(self):
+        with patch("subprocess.run", return_value=self._mock_curl()) as mock_run:
+            speedtest.probe_site_timing("example.com")
+        self.assertIn("https://example.com/", mock_run.call_args[0][0])
+
+    def test_probe_returns_none_on_curl_failure(self):
+        with patch("subprocess.run", return_value=self._mock_curl(stdout="", returncode=7, stderr="could not resolve")):
+            self.assertIsNone(speedtest.probe_site_timing("nope.invalid"))
+
+    def test_probe_returns_none_on_timeout(self):
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("curl", 5)):
+            self.assertIsNone(speedtest.probe_site_timing("slow.example"))
+
+    def test_probe_returns_none_on_zero_http_code(self):
+        bad = "0.0|0.0|0.0|0.0|0.0||000|0.0"
+        with patch("subprocess.run", return_value=self._mock_curl(stdout=bad)):
+            self.assertIsNone(speedtest.probe_site_timing("blocked.example"))
+
+    def test_run_site_timing_uses_median(self):
+        samples = [
+            {"remote_ip": "1.1.1.1", "http_code": 200, "dns_ms": 10.0, "tcp_ms": 20.0,
+             "tls_ms": 30.0, "server_ms": 40.0, "ttfb_ms": 90.0, "total_ms": 100.0},
+            {"remote_ip": "1.1.1.1", "http_code": 200, "dns_ms": 10.0, "tcp_ms": 20.0,
+             "tls_ms": 30.0, "server_ms": 40.0, "ttfb_ms": 90.0, "total_ms": 500.0},
+            {"remote_ip": "1.1.1.1", "http_code": 200, "dns_ms": 10.0, "tcp_ms": 20.0,
+             "tls_ms": 30.0, "server_ms": 40.0, "ttfb_ms": 90.0, "total_ms": 110.0},
+        ]
+        with patch("speedtest.probe_site_timing", side_effect=samples):
+            out = speedtest.run_site_timing_test([{"name": "X", "host": "x.com"}], runs=3, quiet=True)
+        self.assertEqual(len(out), 1)
+        self.assertTrue(out[0]["reachable"])
+        self.assertEqual(out[0]["total_ms"], 110.0)  # median, not the 500 outlier
+        self.assertEqual(out[0]["samples"], 3)
+        self.assertEqual(out[0]["loss_pct"], 0.0)
+
+    def test_run_site_timing_marks_unreachable(self):
+        with patch("speedtest.probe_site_timing", return_value=None):
+            out = speedtest.run_site_timing_test([{"name": "X", "host": "x.com"}], runs=2, quiet=True)
+        self.assertFalse(out[0]["reachable"])
+        self.assertEqual(out[0]["loss_pct"], 100.0)
+        self.assertNotIn("total_ms", out[0])
+
+    def test_default_targets_include_requested_sites(self):
+        names = {t["name"] for t in speedtest.SITE_TIMING_TARGETS}
+        for expected in ("YouTube", "Google", "Amazon"):
+            self.assertIn(expected, names)
+
+
+class TestTracerouteParsing(unittest.TestCase):
+    def test_parses_classic_traceroute(self):
+        out = """traceroute to google.com (142.250.185.100), 20 hops max, 60 byte packets
+ 1  192.168.1.1 (192.168.1.1)  1.234 ms  1.123 ms  1.200 ms
+ 2  10.0.0.1 (10.0.0.1)  10.5 ms  10.2 ms  10.3 ms
+ 3  * * *
+ 4  72.14.239.1 (72.14.239.1)  25.1 ms  24.8 ms  25.0 ms
+"""
+        hops = speedtest.parse_traceroute_output(out)
+        self.assertEqual([h["hop"] for h in hops], [1, 2, 3, 4])
+        self.assertEqual(hops[0]["ip"], "192.168.1.1")
+        self.assertAlmostEqual(hops[0]["rtt_ms"], 1.19, places=2)  # average of 3 probes
+        self.assertTrue(hops[2]["timeout"])
+        self.assertIsNone(hops[2]["rtt_ms"])
+
+    def test_parses_tracepath_and_averages_repeats(self):
+        out = """ 1?: [LOCALHOST]                      pmtu 1500
+ 1:  192.168.1.1                     8.567ms
+ 1:  192.168.1.1                    13.904ms
+ 2:  10.129.128.1                   41.244ms
+"""
+        hops = speedtest.parse_traceroute_output(out)
+        self.assertEqual([h["hop"] for h in hops], [1, 2])
+        self.assertAlmostEqual(hops[0]["rtt_ms"], 11.24, places=2)
+
+    def test_skips_tracepath_trailer_lines(self):
+        out = """ 1:  192.168.1.1   1.0ms
+     Too many hops: pmtu 1500
+     Resume: pmtu 1500
+"""
+        hops = speedtest.parse_traceroute_output(out)
+        self.assertEqual(len(hops), 1)
+
+    def test_parses_ipv6_hops(self):
+        hops = speedtest.parse_traceroute_output(" 1  2606:4700::1111  1.5 ms\n 2  2001:4860::1  10.2 ms\n")
+        self.assertEqual([h["hop"] for h in hops], [1, 2])
+        self.assertEqual(hops[0]["ip"], "2606:4700::1111")
+        self.assertEqual(hops[1]["ip"], "2001:4860::1")
+
+    def test_respects_max_hops(self):
+        out = "".join(f" {i}  10.0.0.{i}  {i}.0ms\n" for i in range(1, 11))
+        self.assertEqual(len(speedtest.parse_traceroute_output(out, max_hops=5)), 5)
+
+    def test_empty_output(self):
+        self.assertEqual(speedtest.parse_traceroute_output(""), [])
+        self.assertEqual(speedtest.parse_traceroute_output("garbage\nlines\n"), [])
+
+    def test_run_traceroute_returns_none_without_binary(self):
+        with patch("speedtest.find_traceroute_command", return_value=None):
+            self.assertIsNone(speedtest.run_traceroute("example.com", debug=True))
+
+    def test_run_traceroute_summarizes_hops(self):
+        res = MagicMock()
+        res.returncode = 0
+        res.stdout = " 1  192.168.1.1  1.0 ms\n 2  10.0.0.1  10.0 ms\n"
+        with patch("speedtest.find_traceroute_command", return_value=(["/usr/bin/traceroute"], "traceroute")), \
+             patch("subprocess.run", return_value=res):
+            trace = speedtest.run_traceroute("example.com", max_hops=10)
+        self.assertEqual(trace["host"], "example.com")
+        self.assertEqual(trace["hop_count"], 2)
+        self.assertEqual(trace["responding_hops"], 2)
+        self.assertEqual(trace["timeout_hops"], 0)
+        self.assertEqual(trace["max_rtt_ms"], 10.0)
+        self.assertEqual(trace["tool"], "traceroute")
+
+    def test_run_traceroute_handles_timeout(self):
+        with patch("speedtest.find_traceroute_command", return_value=(["/usr/bin/traceroute"], "traceroute")), \
+             patch("subprocess.run", side_effect=subprocess.TimeoutExpired("traceroute", 5)):
+            self.assertIsNone(speedtest.run_traceroute("example.com"))
+
+    def test_run_traceroute_unparsable_output_returns_none(self):
+        res = MagicMock()
+        res.returncode = 0
+        res.stdout = "nothing useful here\n"
+        with patch("speedtest.find_traceroute_command", return_value=(["/usr/bin/traceroute"], "traceroute")), \
+             patch("subprocess.run", return_value=res):
+            self.assertIsNone(speedtest.run_traceroute("example.com"))
+
+
+class TestTracerouteRendering(unittest.TestCase):
+    def test_site_table_marks_unreachable(self):
+        buf = io.StringIO()
+        results = [{"name": "YouTube", "host": "y", "reachable": False},
+                   {"name": "Google", "host": "g", "reachable": True, "dns_ms": 1.0, "tcp_ms": 2.0,
+                    "tls_ms": 3.0, "server_ms": 4.0, "ttfb_ms": 5.0, "total_ms": 120.0, "http_code": 200}]
+        with patch("sys.stdout", buf):
+            speedtest.print_site_timing_table(results)
+        out = buf.getvalue()
+        self.assertIn("SITE REACHABILITY TIMING", out)
+        self.assertIn("YouTube", out)
+        self.assertIn("Unreachable", out)
+        self.assertIn("Excellent", out)
+        self.assertIn("HTTP 200", out)
+
+    def test_traceroute_renders_timeouts(self):
+        buf = io.StringIO()
+        trace = {"tool": "traceroute", "hop_count": 2, "responding_hops": 1, "timeout_hops": 1,
+                 "hops": [{"hop": 1, "ip": "10.0.0.1", "rtt_ms": 5.0, "timeout": False},
+                          {"hop": 2, "ip": None, "rtt_ms": None, "timeout": True}]}
+        with patch("sys.stdout", buf):
+            speedtest.print_traceroute(trace)
+        out = buf.getvalue()
+        self.assertIn("HOP-BY-HOP PATH TRACE", out)
+        self.assertIn("10.0.0.1", out)
+        self.assertIn("no reply", out)
+        self.assertIn("1/2 hops responded", out)
+
+    def test_renderers_handle_empty_input(self):
+        with patch("sys.stdout", io.StringIO()):
+            speedtest.print_site_timing_table([])
+            speedtest.print_traceroute({})
+
+
+class TestTracerouteCliFlags(unittest.TestCase):
+    def test_trace_hops_bounds(self):
+        with patch("sys.argv", ["speedtest.sh", "--traceroute", "--trace-hops", "0"]), \
+             patch("sys.stderr", io.StringIO()):
+            self.assertEqual(speedtest.run_benchmark(), 1)
+
+    def test_trace_runs_bounds(self):
+        with patch("sys.argv", ["speedtest.sh", "--traceroute", "--trace-runs", "50"]), \
+             patch("sys.stderr", io.StringIO()):
+            self.assertEqual(speedtest.run_benchmark(), 1)
+
+    def test_trace_target_rejects_bad_scheme(self):
+        with patch("sys.argv", ["speedtest.sh", "--trace-target", "file:///etc/passwd"]), \
+             patch("sys.stderr", io.StringIO()):
+            self.assertEqual(speedtest.run_benchmark(), 1)
+
+    def test_trace_target_implies_traceroute_and_normalizes_host(self):
+        with patch("sys.argv", ["speedtest.sh", "--trace-target", "https://www.example.com/path"]), \
+             patch("speedtest.run_benchmark_cycle", return_value=0) as mock_cycle:
+            speedtest.run_benchmark()
+            args = mock_cycle.call_args[0][0]
+            self.assertTrue(args.traceroute)
+            self.assertEqual(args.trace_target, "www.example.com")
+
+    def test_traceroute_disabled_by_default(self):
+        with patch("sys.argv", ["speedtest.sh"]), \
+             patch("speedtest.run_benchmark_cycle", return_value=0) as mock_cycle:
+            speedtest.run_benchmark()
+            self.assertFalse(mock_cycle.call_args[0][0].traceroute)
+
+    def test_validate_args_covers_trace_options(self):
+        args = MagicMock()
+        args.runs, args.timeout, args.monitor = 3, 18, None
+        args.engine, args.server = "all", None
+        args.threshold_dl = args.threshold_ul = args.threshold_ping = None
+        args.trace_hops, args.trace_runs, args.trace_target = 20, 3, None
+        self.assertIsNone(speedtest.validate_args(args))
+        args.trace_hops = 999
+        self.assertIn("--trace-hops", speedtest.validate_args(args))
+        args.trace_hops, args.trace_runs = 20, 0
+        self.assertIn("--trace-runs", speedtest.validate_args(args))
+        args.trace_runs, args.trace_target = 3, "ftp://x/y"
+        self.assertIn("--trace-target", speedtest.validate_args(args))
+        args.trace_target = "example.com"
+        self.assertIsNone(speedtest.validate_args(args))
+
+
 class TestValidateArgs(unittest.TestCase):
     def _args(self, **kwargs):
         args = MagicMock()
@@ -1428,6 +1668,9 @@ class TestValidateArgs(unittest.TestCase):
         args.threshold_dl = None
         args.threshold_ul = None
         args.threshold_ping = None
+        args.trace_hops = speedtest.TRACEROUTE_DEFAULT_MAX_HOPS
+        args.trace_runs = speedtest.SITE_TIMING_RUNS
+        args.trace_target = None
         for k, v in kwargs.items():
             setattr(args, k, v)
         return args
