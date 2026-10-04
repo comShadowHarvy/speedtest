@@ -1657,6 +1657,110 @@ class TestTracerouteCliFlags(unittest.TestCase):
         self.assertIsNone(speedtest.validate_args(args))
 
 
+class TestTraceReportIntegration(unittest.TestCase):
+    def _data(self):
+        return {
+            "timestamp": "2026-01-01T00:00:00", "version": "3.2.0",
+            "network": {"geo": {"isp": "ISP"}, "adapter": {"interface": "eth0"}},
+            "statistics": {}, "suitability": {"overall_score": 80.0}, "dns_recommendation": {},
+            "site_timings": [
+                {"name": "YouTube", "host": "www.youtube.com", "reachable": True, "dns_ms": 1.0,
+                 "tcp_ms": 49.1, "tls_ms": 55.6, "server_ms": 132.2, "ttfb_ms": 243.0,
+                 "total_ms": 534.3, "http_code": 200, "remote_ip": "142.251.1.1"},
+                {"name": "Down", "host": "down.example", "reachable": False},
+            ],
+            "traceroutes": [{
+                "host": "www.google.com", "tool": "traceroute", "hop_count": 2,
+                "responding_hops": 1, "timeout_hops": 1,
+                "hops": [{"hop": 1, "ip": "192.168.1.1", "rtt_ms": 1.0, "timeout": False},
+                         {"hop": 2, "ip": None, "rtt_ms": None, "timeout": True}],
+            }],
+        }
+
+    def test_html_report_includes_site_timing_and_hops(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = os.path.join(td, "r.html")
+            with patch("speedtest.HISTORY_FILE", "/nonexistent/history.json"):
+                self.assertTrue(speedtest.export_html_report(out, self._data()))
+            with open(out, "r") as f:
+                content = f.read()
+            self.assertIn("Site Reachability Timing", content)
+            self.assertIn("www.youtube.com", content)
+            self.assertIn("534.3 ms", content)
+            self.assertIn("Unreachable", content)
+            self.assertIn("Hop-by-Hop Path", content)
+            self.assertIn("192.168.1.1", content)
+            self.assertIn("no reply", content)
+
+    def test_html_report_omits_section_without_data(self):
+        data = self._data()
+        data["site_timings"] = None
+        data["traceroutes"] = None
+        with tempfile.TemporaryDirectory() as td:
+            out = os.path.join(td, "r.html")
+            with patch("speedtest.HISTORY_FILE", "/nonexistent/history.json"):
+                self.assertTrue(speedtest.export_html_report(out, data))
+            with open(out, "r") as f:
+                self.assertNotIn("Site Reachability Timing", f.read())
+
+    def test_html_trace_values_are_escaped(self):
+        data = self._data()
+        data["site_timings"][0]["name"] = "<script>alert(1)</script>"
+        data["traceroutes"][0]["hops"][0]["ip"] = "1.1.1.1\"><img src=x>"
+        with tempfile.TemporaryDirectory() as td:
+            out = os.path.join(td, "r.html")
+            with patch("speedtest.HISTORY_FILE", "/nonexistent/history.json"):
+                self.assertTrue(speedtest.export_html_report(out, data))
+            with open(out, "r") as f:
+                content = f.read()
+            self.assertNotIn("<script>alert(1)</script>", content)
+            self.assertNotIn("<img src=x>", content)
+
+    def test_markdown_report_includes_site_timing_and_hops(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = os.path.join(td, "r.md")
+            self.assertTrue(speedtest.export_markdown_report(out, self._data()))
+            with open(out, "r") as f:
+                content = f.read()
+            self.assertIn("Site Reachability Timing", content)
+            self.assertIn("**534.3 ms**", content)
+            self.assertIn("Unreachable", content)
+            self.assertIn("Hop-by-Hop Path to www.google.com", content)
+            self.assertIn("no reply", content)
+
+    def test_markdown_report_omits_section_without_data(self):
+        data = self._data()
+        data["site_timings"] = None
+        data["traceroutes"] = None
+        with tempfile.TemporaryDirectory() as td:
+            out = os.path.join(td, "r.md")
+            self.assertTrue(speedtest.export_markdown_report(out, data))
+            with open(out, "r") as f:
+                self.assertNotIn("Site Reachability Timing", f.read())
+
+    def test_trace_values_with_pipes_do_not_break_markdown_table(self):
+        data = self._data()
+        data["site_timings"][0]["name"] = "Pipe|Name"
+        with tempfile.TemporaryDirectory() as td:
+            out = os.path.join(td, "r.md")
+            self.assertTrue(speedtest.export_markdown_report(out, data))
+            with open(out, "r") as f:
+                for line in f:
+                    if "Pipe" in line:
+                        self.assertIn("Pipe\\|Name", line)
+
+    def test_trace_handles_non_numeric_values(self):
+        data = self._data()
+        data["site_timings"][0]["total_ms"] = "n/a"
+        data["traceroutes"][0]["hops"][0]["rtt_ms"] = None
+        with tempfile.TemporaryDirectory() as td:
+            html_out = os.path.join(td, "r.html")
+            md_out = os.path.join(td, "r.md")
+            with patch("speedtest.HISTORY_FILE", "/nonexistent/history.json"):
+                self.assertTrue(speedtest.export_html_report(html_out, data))
+            self.assertTrue(speedtest.export_markdown_report(md_out, data))
+
+
 class TestValidateArgs(unittest.TestCase):
     def _args(self, **kwargs):
         args = MagicMock()

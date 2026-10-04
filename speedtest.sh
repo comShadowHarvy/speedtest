@@ -2040,6 +2040,67 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
             d_ip_js = html.escape(json.dumps(d_ip_raw), quote=True)
             dns_rows += f"<tr><td><strong>{rank_display}</strong></td><td><strong>{d_name}</strong></td><td><code class='font-mono'>{d_ip}</code><button class='copy-ip-btn' onclick='copyText({d_ip_js})'>📋</button></td><td style='color:var(--accent-green)'><strong>{d_lat:.2f} ms</strong></td><td><span class='badge'>{d_cat}</span></td></tr>"
 
+        # Site reachability timing rows (--traceroute). All values are host-provided,
+        # so names/hosts/IPs are HTML-escaped and numbers are coerced defensively.
+        site_timing_rows = ""
+        for st in (export_data.get("site_timings") or []):
+            st_name = html.escape(str(st.get("name", "?")))
+            st_host = html.escape(str(st.get("host", "")))
+            if not st.get("reachable"):
+                site_timing_rows += (f"<tr><td><strong>{st_name}</strong></td>"
+                                     f"<td><code class='font-mono'>{st_host}</code></td>"
+                                     f"<td colspan='6'><span class='badge' style='background:rgba(239,68,68,0.2);color:#ef4444'>Unreachable</span></td></tr>")
+                continue
+
+            def _f(key: str) -> float:
+                try:
+                    return float(st.get(key, 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    return 0.0
+
+            total = _f("total_ms")
+            if total <= 0:
+                t_color = "#ef4444"
+            elif total < 300:
+                t_color = "#10b981"
+            elif total < 800:
+                t_color = "#f59e0b"
+            else:
+                t_color = "#ef4444"
+            st_ip = html.escape(str(st.get("remote_ip", "")))
+            site_timing_rows += (
+                f"<tr><td><strong>{st_name}</strong></td>"
+                f"<td><code class='font-mono'>{st_host}</code></td>"
+                f"<td><code class='font-mono'>{st_ip}</code></td>"
+                f"<td>{_f('dns_ms'):.1f} ms</td>"
+                f"<td>{_f('tcp_ms'):.1f} ms</td>"
+                f"<td>{_f('tls_ms'):.1f} ms</td>"
+                f"<td>{_f('server_ms'):.1f} ms</td>"
+                f"<td><strong style='color:{t_color}'>{total:.1f} ms</strong></td>"
+                f"<td><span class='badge'>HTTP {int(_f('http_code'))}</span></td></tr>"
+            )
+
+        traceroute_blocks = ""
+        for tr in (export_data.get("traceroutes") or []):
+            hop_rows = ""
+            for hop in tr.get("hops", []):
+                if hop.get("timeout") or hop.get("rtt_ms") is None:
+                    hop_rows += f"<tr><td>{hop.get('hop')}</td><td><code class='font-mono'>*</code></td><td><span class='badge'>no reply</span></td></tr>"
+                    continue
+                rtt = float(hop["rtt_ms"])
+                r_color = "#10b981" if rtt < 30 else ("#f59e0b" if rtt < 100 else "#ef4444")
+                hop_rows += (f"<tr><td>{hop.get('hop')}</td>"
+                             f"<td><code class='font-mono'>{html.escape(str(hop.get('ip') or '?'))}</code></td>"
+                             f"<td><strong style='color:{r_color}'>{rtt:.2f} ms</strong></td></tr>")
+            traceroute_blocks += (
+                "<div style='margin-top:12px;'>"
+                f"<div style='font-weight:700; margin-bottom:6px; color:var(--accent-purple);'>"
+                f"🧭 Hop-by-Hop Path to {html.escape(str(tr.get('host', '')))} "
+                f"<span class='badge'>{tr.get('responding_hops', 0)}/{tr.get('hop_count', 0)} hops via {html.escape(str(tr.get('tool', '?')))}</span></div>"
+                "<table class='data-table'><thead><tr><th>Hop</th><th>Address</th><th>RTT</th></tr></thead>"
+                f"<tbody>{hop_rows}</tbody></table></div>"
+            )
+
         score_color = "#10b981" if score >= 85 else ("#06b6d4" if score >= 70 else ("#f59e0b" if score >= 50 else "#ef4444"))
         score_circumference = 314.16
         dash_offset = score_circumference - (score_circumference * (score / 100.0))
@@ -2413,6 +2474,20 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
         </div>
 
         {f'''
+        <!-- Site Reachability Timing (--traceroute) -->
+        <div class="card" style="margin-bottom: 26px;">
+            <div class="card-title">🧭 Site Reachability Timing (Traceroute-Style)</div>
+            <table>
+                <thead>
+                    <tr><th>Site</th><th>Host</th><th>Edge IP</th><th>DNS</th><th>TCP</th><th>TLS</th><th>Server</th><th>Total</th><th>Status</th></tr>
+                </thead>
+                <tbody>{site_timing_rows}</tbody>
+            </table>
+            {traceroute_blocks}
+        </div>
+        ''' if site_timing_rows else ''}
+
+        {f'''
         <!-- DNS Resolution Leaderboard & Profiles -->
         <div class="card" style="margin-bottom: 26px;">
             <div class="card-title">DNS Resolution Leaderboard & Latency Ranking</div>
@@ -2595,6 +2670,55 @@ def export_markdown_report(filepath: str, export_data: Dict[str, Any], debug: bo
                 )
             md_dns_table = "\n".join(rows) + "\n"
 
+        # Site reachability timing section (--traceroute).
+        md_trace_section = ""
+        site_timings = export_data.get("site_timings") or []
+        if site_timings:
+            trace_lines = ["## 🧭 Site Reachability Timing (Traceroute-Style)", "",
+                           "| Site | Host | Edge IP | DNS | TCP | TLS | Server | Total | Status |",
+                           "| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- |"]
+
+            def _num(entry: Dict[str, Any], key: str) -> float:
+                try:
+                    return float(entry.get(key, 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    return 0.0
+
+            for st in site_timings:
+                if not st.get("reachable"):
+                    trace_lines.append(
+                        f"| **{md_escape(st.get('name', '?'))}** | `{md_escape(st.get('host', ''))}` | "
+                        f"| | | | | | | **Unreachable** |"
+                    )
+                    continue
+                total = _num(st, "total_ms")
+                if total < 300:
+                    verdict = "Excellent"
+                elif total < 800:
+                    verdict = "Fair"
+                else:
+                    verdict = "Slow"
+                trace_lines.append(
+                    f"| **{md_escape(st.get('name', '?'))}** | `{md_escape(st.get('host', ''))}` | "
+                    f"`{md_escape(st.get('remote_ip', ''))}` | {_num(st, 'dns_ms'):.1f} ms | "
+                    f"{_num(st, 'tcp_ms'):.1f} ms | {_num(st, 'tls_ms'):.1f} ms | "
+                    f"{_num(st, 'server_ms'):.1f} ms | **{total:.1f} ms** | {verdict} |"
+                )
+
+            for tr in (export_data.get("traceroutes") or []):
+                trace_lines += ["", f"### 🗺️ Hop-by-Hop Path to {md_escape(tr.get('host', ''))}",
+                                f"_via {md_escape(tr.get('tool', '?'))}: "
+                                f"{tr.get('responding_hops', 0)}/{tr.get('hop_count', 0)} hops responded_", "",
+                                "| Hop | Address | RTT |", "| ---: | :--- | ---: |"]
+                for hop in tr.get("hops", []):
+                    if hop.get("timeout") or hop.get("rtt_ms") is None:
+                        trace_lines.append(f"| {hop.get('hop')} | `*` | no reply |")
+                    else:
+                        trace_lines.append(
+                            f"| {hop.get('hop')} | `{md_escape(hop.get('ip') or '?')}` | {float(hop['rtt_ms']):.2f} ms |")
+
+            md_trace_section = "\n".join(trace_lines) + "\n"
+
         st_dl = stats.get("speedtest_download_mbps", {}).get("avg", 0.0)
         fast_dl = stats.get("fast_download_mbps", {}).get("avg", 0.0)
         cf_dl = stats.get("cloudflare_download_mbps", {}).get("avg", 0.0)
@@ -2658,6 +2782,7 @@ def export_markdown_report(filepath: str, export_data: Dict[str, Any], debug: bo
 - **4K/8K Streaming:** {m_streaming} ({suitability.get("streaming", {}).get("score", 0)}/100)
 - **Video Calls:** {m_calls} ({suitability.get("video_call", {}).get("score", 0)}/100)
 
+{md_trace_section}
 ---
 
 ## 💡 DNS Resolution Leaderboard & Recommendations
