@@ -1032,6 +1032,43 @@ class TestSlaThresholdsAndExitCodes(unittest.TestCase):
             code = speedtest.run_benchmark_cycle(args)
         self.assertEqual(code, 2)
 
+    @patch("speedtest.get_network_adapter_info", return_value={"interface": "eth0", "gateway": "192.168.1.1", "link_speed": "1 Gbps", "interface_type": "Ethernet", "wifi_ssid": "N/A", "wifi_signal": "N/A", "mtu": "1500"})
+    @patch("speedtest.get_geo_info", return_value={"ip": "1.2.3.4", "isp": "ISP", "city": "City", "country": "Country"})
+    @patch("speedtest.get_lan_ip", return_value="192.168.1.50")
+    @patch("speedtest.check_endpoints", return_value=(True, True, True))
+    @patch("speedtest.save_history_record")
+    @patch("speedtest.measure_idle_ping", return_value={"loss": 100.0, "stats": {"min": 0.0, "max": 0.0, "avg": 0.0, "median": 0.0}, "jitter": 0.0, "samples": []})
+    @patch("speedtest.get_speedtest", return_value=None)
+    @patch("speedtest.get_fastcom", return_value=None)
+    @patch("speedtest.get_cloudflare", return_value=None)
+    def test_no_false_sla_alert_without_measurements(self, *mocks):
+        # Every engine failed, but a threshold is set: must return 2, never 3 (0.0 is not a breach).
+        args = self._create_mock_args(threshold_dl=1.0, threshold_ping=1.0)
+        out = io.StringIO()
+        with patch("sys.stdout", out), patch("time.sleep"):
+            code = speedtest.run_benchmark_cycle(args)
+        self.assertEqual(code, 2)
+        self.assertNotIn("SLA ALERT", out.getvalue())
+
+    @patch("speedtest.get_network_adapter_info", return_value={"interface": "eth0", "gateway": "192.168.1.1", "link_speed": "1 Gbps", "interface_type": "Ethernet", "wifi_ssid": "N/A", "wifi_signal": "N/A", "mtu": "1500"})
+    @patch("speedtest.get_geo_info", return_value={"ip": "1.2.3.4", "isp": "ISP", "city": "City", "country": "Country"})
+    @patch("speedtest.get_lan_ip", return_value="192.168.1.50")
+    @patch("speedtest.check_endpoints", return_value=(True, True, True))
+    @patch("speedtest.save_history_record")
+    @patch("speedtest.measure_idle_ping", return_value={"loss": 0.0, "stats": {"min": 10.0, "max": 10.0, "avg": 10.0, "median": 10.0}, "jitter": 1.0, "samples": [10.0]})
+    @patch("speedtest.get_speedtest", return_value={"download": 50.0, "upload": 20.0, "ping": 10.0, "jitter": 1.0, "dl_latency": 12.0, "ul_latency": 15.0, "engine_type": "Ookla"})
+    @patch("speedtest.get_fastcom", return_value=None)
+    @patch("speedtest.get_cloudflare", return_value=None)
+    def test_json_stdout_keeps_sla_alert_off_stdout(self, *mocks):
+        args = self._create_mock_args(json_stdout=True, quiet=False, threshold_dl=100.0)
+        out, err = io.StringIO(), io.StringIO()
+        with patch("sys.stdout", out), patch("sys.stderr", err), patch("time.sleep"):
+            code = speedtest.run_benchmark_cycle(args)
+        self.assertEqual(code, 3)
+        json.loads(out.getvalue())  # stdout must remain valid JSON
+        self.assertIn("SLA ALERT", err.getvalue())
+        self.assertNotIn("SLA ALERT", out.getvalue())
+
 
 class TestValidateArgs(unittest.TestCase):
     def _args(self, **kwargs):

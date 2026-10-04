@@ -2558,6 +2558,10 @@ def run_single_benchmark(
 
 def run_benchmark_cycle(args) -> int:
     """Run one complete benchmark cycle with diagnostics, scoring, and data exports."""
+    # Invariant: machine-readable output implies no human-readable chatter on stdout,
+    # regardless of how the caller populated args.
+    if getattr(args, "json_stdout", False):
+        args.quiet = True
     ip_ver = "4" if getattr(args, "ipv4", False) else ("6" if getattr(args, "ipv6", False) else None)
     st_ok, fast_ok, cf_ok = check_endpoints(args.quiet, args.debug, ip_version=ip_ver)
 
@@ -2595,7 +2599,6 @@ def run_benchmark_cycle(args) -> int:
     ul_ping_samples: List[float] = []
 
     # 1. DNS Resolution Probes (Fast parallel execution, ~1-1.5s)
-    dns_results: Optional[Dict[str, Any]] = None
     dns_rec: Optional[Dict[str, Any]] = None
     if getattr(args, "dns", True) and not getattr(args, "no_dns", False):
         sp_dns = Spinner("Benchmarking DNS Resolvers & Latency", quiet=args.quiet)
@@ -2799,6 +2802,9 @@ def run_benchmark_cycle(args) -> int:
 
     exit_code = 0
 
+    # Errors/alerts go to stderr in --json-stdout mode so stdout stays machine-parseable JSON.
+    msg_stream = sys.stderr if getattr(args, "json_stdout", False) else sys.stdout
+
     # JSON stdout output for automation / pipes
     if getattr(args, "json_stdout", False):
         print(json.dumps(export_data, indent=2))
@@ -2809,7 +2815,7 @@ def run_benchmark_cycle(args) -> int:
             if not args.quiet:
                 print(f"{C.GREEN}[✔] JSON data exported to {args.json}{C.RESET}")
         else:
-            print(f"{C.RED}[!] Failed to write JSON: {args.json}{C.RESET}")
+            print(f"{C.RED}[!] Failed to write JSON: {args.json}{C.RESET}", file=msg_stream)
             exit_code = 1
 
     if args.csv:
@@ -2817,7 +2823,7 @@ def run_benchmark_cycle(args) -> int:
             if not args.quiet:
                 print(f"{C.GREEN}[✔] CSV data exported to {args.csv}{C.RESET}")
         else:
-            print(f"{C.RED}[!] Failed to write CSV: {args.csv}{C.RESET}")
+            print(f"{C.RED}[!] Failed to write CSV: {args.csv}{C.RESET}", file=msg_stream)
             exit_code = 1
 
     if getattr(args, "markdown", None):
@@ -2825,7 +2831,7 @@ def run_benchmark_cycle(args) -> int:
             if not args.quiet:
                 print(f"{C.GREEN}[✔] Markdown report exported to {args.markdown}{C.RESET}")
         else:
-            print(f"{C.RED}[!] Failed to write Markdown report: {args.markdown}{C.RESET}")
+            print(f"{C.RED}[!] Failed to write Markdown report: {args.markdown}{C.RESET}", file=msg_stream)
             exit_code = 1
 
     if args.html and not getattr(args, "no_html", False):
@@ -2835,26 +2841,30 @@ def run_benchmark_cycle(args) -> int:
             if args.open:
                 open_browser_report(args.html, quiet=args.quiet, debug=args.debug)
         else:
-            if not getattr(args, "json_stdout", False):
-                print(f"{C.RED}[!] Failed to write HTML report: {args.html}{C.RESET}")
+            print(f"{C.RED}[!] Failed to write HTML report: {args.html}{C.RESET}", file=msg_stream)
             exit_code = 1
 
-    # SLA Threshold Checks
-    if getattr(args, "threshold_dl", None) is not None:
-        if max_dl < args.threshold_dl:
-            print(f"{C.RED}[SLA ALERT] Download speed ({max_dl} Mbps) is below required threshold ({args.threshold_dl} Mbps)!{C.RESET}")
-            exit_code = 3
-    if getattr(args, "threshold_ul", None) is not None:
-        if max_ul < args.threshold_ul:
-            print(f"{C.RED}[SLA ALERT] Upload speed ({max_ul} Mbps) is below required threshold ({args.threshold_ul} Mbps)!{C.RESET}")
-            exit_code = 3
-    if getattr(args, "threshold_ping", None) is not None:
-        if ping_stats["avg"] > args.threshold_ping:
-            print(f"{C.RED}[SLA ALERT] Ping latency ({ping_stats['avg']} ms) exceeds threshold limit ({args.threshold_ping} ms)!{C.RESET}")
-            exit_code = 3
+    # SLA Threshold Checks - only meaningful when at least one measurement succeeded,
+    # otherwise every threshold would be reported as violated by the 0.0 fallback values.
+    has_measurements = bool(st_results or fast_results or cf_results or custom_results)
+    if has_measurements:
+        if getattr(args, "threshold_dl", None) is not None:
+            if max_dl < args.threshold_dl:
+                print(f"{C.RED}[SLA ALERT] Download speed ({max_dl} Mbps) is below required threshold ({args.threshold_dl} Mbps)!{C.RESET}", file=msg_stream)
+                exit_code = 3
+        if getattr(args, "threshold_ul", None) is not None:
+            if max_ul < args.threshold_ul:
+                print(f"{C.RED}[SLA ALERT] Upload speed ({max_ul} Mbps) is below required threshold ({args.threshold_ul} Mbps)!{C.RESET}", file=msg_stream)
+                exit_code = 3
+        if getattr(args, "threshold_ping", None) is not None:
+            if ping_stats["avg"] > args.threshold_ping:
+                print(f"{C.RED}[SLA ALERT] Ping latency ({ping_stats['avg']} ms) exceeds threshold limit ({args.threshold_ping} ms)!{C.RESET}", file=msg_stream)
+                exit_code = 3
 
-    if not st_ok and not fast_ok and not cf_ok and not custom_url:
-        return 2
+    # No engine returned a single usable measurement: report dedicated exit code 2
+    # (unless an export already failed with code 1, which is more actionable).
+    if not has_measurements:
+        return exit_code or 2
 
     return exit_code
 
