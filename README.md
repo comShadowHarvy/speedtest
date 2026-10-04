@@ -33,6 +33,7 @@ A high-performance, cross-platform CLI tool for network speed benchmarking, dual
     - 🌐 **Global Anycast Reliability**: Google Public DNS (`8.8.8.8` / `8.8.4.4`)
   - Displays dynamic latency benchmarks, rank, and percentage speedup vs. current system resolver.
 - **Hardware & Network Adapter Diagnostics**: Detects active network interface, connection type (Ethernet, Wi-Fi, VPN), NIC Link Speed (e.g., 1.0 Gbps / 2.5 Gbps / 10 Gbps), Wi-Fi SSID, Signal dBm & %, Channel, Frequency Band (2.4/5/6 GHz), and MTU (including `/proc/net/wireless` and macOS `scutil` fallbacks).
+- **Traceroute-Style Site Reachability Timing (`--traceroute`)**: Measures per-phase connection timings (DNS / TCP / TLS / server / TTFB / total, median of N runs) to YouTube, Google, Amazon, Netflix, Cloudflare, Microsoft, Apple and GitHub, plus hop-by-hop paths when `traceroute`/`tracepath` is installed. Phase timings need no privileges; `--trace-target` probes a single host instead.
 - **Interactive Glassmorphism HTML Dashboard (`report.html` & auto-opened by default)**: Self-contained, responsive dashboard with Outfit & JetBrains Mono typography, animated SVG score gauge, directional bufferbloat visualizer, 1-click copy for DNS IPs with toast notifications, client-side JSON export, dark/light mode toggle (saved to `localStorage`), and PDF printing support (100% offline-ready). Automatically exported to `report.html` and opened in your preferred browser (Firefox → Brave → Chrome) after testing (disable with `--no-open` or `--no-html`).
 - **Terminal Sparklines & History (`--history` & `--history-graph`)**: Visualizes historical speed trends directly in the terminal using Unicode sparklines (` ▂▃▅▆▇█`).
 - **SLA Threshold Alerts**: Set minimum download/upload thresholds or max latency limits (`--threshold-dl`, `--threshold-ul`, `--threshold-ping`) for automated monitoring and CI/CD pipelines (exits with code `3` if violated).
@@ -144,6 +145,12 @@ python3 speedtest.sh [options]
 --history-graph         Render sparkline trend graph with history
 --history-clear         Clear historical benchmark log file
 --monitor MINS          Continuous monitoring mode interval in minutes (1..1440)
+--traceroute            Measure per-site DNS/TCP/TLS/TTFB timings for popular sites
+                        (YouTube, Google, Amazon, Netflix, Cloudflare, Microsoft,
+                        Apple, GitHub) plus hop-by-hop paths when available
+--trace-target HOST     Probe only this host instead of the built-in list (implies --traceroute)
+--trace-hops N          Maximum hops for path traces (default: 20, max: 64)
+--trace-runs N          Samples per site, median reported (default: 3, max: 10)
 --quiet                 Suppress banner and live progress output, show only summary
 --no-color              Disable ANSI terminal colors
 --debug                 Enable debug logs for troubleshooting
@@ -162,6 +169,8 @@ Invalid flag combinations fail fast, before any benchmark work is done:
 - `--server` cannot be combined with a non-`all`, non-`custom` engine
 - `--server` must use `http://` or `https://` (blocks `file://` and other local/scheme abuse)
 - `--dns`/`--no-dns`, `-4`/`-6`, `--html`/`--no-html`, `--open`/`--no-open` are mutually exclusive
+- `--trace-hops` must be between 1 and 64, `--trace-runs` between 1 and 10
+- `--trace-target` must be a hostname or an `http(s)` URL
 
 ### Exit Codes
 
@@ -224,6 +233,42 @@ cycles produced no measurements, and `Ctrl+C` exits cleanly with code 0.
 ```bash
 ./speedtest.sh --engine custom --server "https://speed.hetzner.de/100MB.bin"
 ```
+
+### 9. Traceroute-Style Site Timing
+```bash
+./speedtest.sh --traceroute
+```
+
+Breaks the time to reach each popular site into phases, so you can tell
+*which part* is slow:
+
+```
+Site             DNS     TCP     TLS   Server     TTFB    Total  Status
+YouTube         1.0m   49.1m   55.6m   132.2m   243.0m  534.3m  Fair
+Amazon          0.9m   46.9m   70.2m   147.3m   265.2m  265.2m  Excellent
+```
+
+- **DNS** — name resolution
+- **TCP** — connection establishment
+- **TLS** — TLS handshake
+- **Server** — server think time between handshake and first byte
+- **TTFB / Total** — first byte and full response
+
+Timings are the **median of N runs** (`--trace-runs`), so one slow sample
+cannot skew the result. Phase timings need no privileges.
+
+If `traceroute` or `tracepath` is installed, hop-by-hop paths to Google and
+Amazon are added automatically; otherwise the tool prints a hint on how to
+enable it and continues with phase timings only.
+
+### 10. Trace a Single Host
+```bash
+./speedtest.sh --trace-target github.com
+./speedtest.sh --trace-target "https://github.com/some/path" --trace-hops 30
+```
+
+`--trace-target` accepts a bare hostname or a URL (reduced to its hostname),
+and implies `--traceroute`.
 
 ---
 
