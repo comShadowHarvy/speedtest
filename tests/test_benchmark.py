@@ -7,6 +7,7 @@ import csv
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -474,6 +475,70 @@ class TestReportsExport(unittest.TestCase):
                 content = f.read()
                 self.assertNotIn("1.00 Mbps", content)
                 self.assertIn("N/A", content)
+        finally:
+            if os.path.exists(tf_path):
+                os.unlink(tf_path)
+
+    def test_export_html_report_script_block_injection(self):
+        # A </script> inside host-provided data must not terminate the data island.
+        data = json.loads(json.dumps(self.test_data))
+        data["network"]["geo"]["isp"] = "</script><script>alert('pwned')</script>"
+        data["network"]["geo"]["city"] = "</SCRIPT ><img src=x onerror=alert(1)>"
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as tf:
+            tf_path = tf.name
+        try:
+            with patch("speedtest.HISTORY_FILE", "/nonexistent/history.json"):
+                self.assertTrue(speedtest.export_html_report(tf_path, data))
+            with open(tf_path, "r") as f:
+                content = f.read()
+            script_blocks = re.findall(r"<script>(.*?)</script>", content, re.DOTALL)
+            self.assertTrue(script_blocks)
+            # Exactly one script element: the payload never terminates the data island.
+            self.assertEqual(content.count("<script>"), 1)
+            self.assertEqual(content.count("</script>"), 1)
+            self.assertIn("\\u003c/script\\u003e", content)
+        finally:
+            if os.path.exists(tf_path):
+                os.unlink(tf_path)
+
+    def test_export_html_report_dns_copy_button_is_js_safe(self):
+        data = json.loads(json.dumps(self.test_data))
+        data["dns_recommendation"]["leaderboard"] = [{
+            "rank": 1,
+            "name": "Evil",
+            "ip": "1.1.1.1'+alert(1)+'",
+            "latency_ms": 5.0,
+            "category": "Public",
+        }]
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as tf:
+            tf_path = tf.name
+        try:
+            with patch("speedtest.HISTORY_FILE", "/nonexistent/history.json"):
+                self.assertTrue(speedtest.export_html_report(tf_path, data))
+            with open(tf_path, "r") as f:
+                content = f.read()
+            m = re.search(r"onclick='copyText\((.*?)\)'", content)
+            self.assertIsNotNone(m, "copy button handler missing")
+            # The argument must round-trip through JSON as a single literal string.
+            self.assertEqual(json.loads(m.group(1).replace("&quot;", '"').replace("&#x27;", "'")), "1.1.1.1'+alert(1)+'")
+        finally:
+            if os.path.exists(tf_path):
+                os.unlink(tf_path)
+
+    def test_export_html_report_summary_template_injection(self):
+        # Backticks/${} in the speed tier must not break out of the JS template literal.
+        data = json.loads(json.dumps(self.test_data))
+        data["suitability"]["speed_tier"] = "Evil`);alert(1);//"
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as tf:
+            tf_path = tf.name
+        try:
+            with patch("speedtest.HISTORY_FILE", "/nonexistent/history.json"):
+                self.assertTrue(speedtest.export_html_report(tf_path, data))
+            with open(tf_path, "r") as f:
+                content = f.read()
+            m = re.search(r'const REPORT_TIER = ("(?:[^"\\]|\\.)*");', content)
+            self.assertIsNotNone(m)
+            self.assertEqual(json.loads(m.group(1)), "Evil`);alert(1);//")
         finally:
             if os.path.exists(tf_path):
                 os.unlink(tf_path)

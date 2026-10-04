@@ -1672,16 +1672,39 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
             rank = item.get("rank", 1)
             rank_display = "🥇 1" if rank == 1 else ("🥈 2" if rank == 2 else ("🥉 3" if rank == 3 else f"#{rank}"))
             d_name = html.escape(str(item.get("name", "")))
-            d_ip = html.escape(str(item.get("ip", "")))
+            d_ip_raw = str(item.get("ip", ""))
+            d_ip = html.escape(d_ip_raw)
             d_cat = html.escape(str(item.get("category", "")))
-            d_lat = item.get("latency_ms", 0.0)
-            dns_rows += f"<tr><td><strong>{rank_display}</strong></td><td><strong>{d_name}</strong></td><td><code class='font-mono'>{d_ip}</code><button class='copy-ip-btn' onclick='copyText(\"{d_ip}\")'>📋</button></td><td style='color:var(--accent-green)'><strong>{d_lat:.2f} ms</strong></td><td><span class='badge'>{d_cat}</span></td></tr>"
+            try:
+                d_lat = float(item.get("latency_ms", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                d_lat = 0.0
+            # The click handler is a JS string inside an HTML attribute: HTML-escaping
+            # alone is not enough (the parser decodes &quot; back to " before JS sees
+            # it), so JSON-encode the argument first and escape the result for HTML.
+            d_ip_js = html.escape(json.dumps(d_ip_raw), quote=True)
+            dns_rows += f"<tr><td><strong>{rank_display}</strong></td><td><strong>{d_name}</strong></td><td><code class='font-mono'>{d_ip}</code><button class='copy-ip-btn' onclick='copyText({d_ip_js})'>📋</button></td><td style='color:var(--accent-green)'><strong>{d_lat:.2f} ms</strong></td><td><span class='badge'>{d_cat}</span></td></tr>"
 
         score_color = "#10b981" if score >= 85 else ("#06b6d4" if score >= 70 else ("#f59e0b" if score >= 50 else "#ef4444"))
         score_circumference = 314.16
         dash_offset = score_circumference - (score_circumference * (score / 100.0))
 
-        raw_json_escaped = json.dumps(export_data).replace("</script>", "<\\/script>")
+        # Embed benchmark data as a JS literal that cannot terminate the surrounding
+        # <script> block or inject template literals/JS strings downstream:
+        # escape <, >, & and the JS line separators, which are invalid in string literals.
+        raw_json_escaped = (
+            json.dumps(export_data)
+            .replace("<", "\\u003c")
+            .replace(">", "\\u003e")
+            .replace("&", "\\u0026")
+            .replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029")
+        )
+
+        # JS string literal (double-quoted, escaped) for values used inside template
+        # literals below, so backticks/${} in host-provided data cannot break out.
+        js_ts = json.dumps(ts)
+        js_tier = json.dumps(str(tier))
 
         html_content = f"""<!DOCTYPE html>
 <html lang="en" data-theme="dark">
@@ -2098,6 +2121,8 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
     </div>
 
     <script>
+        const REPORT_TS = {js_ts};
+        const REPORT_TIER = {js_tier};
         const rawBenchmarkData = {raw_json_escaped};
 
         function showToast(msg) {{
@@ -2125,7 +2150,7 @@ def export_html_report(filepath: str, export_data: Dict[str, Any], debug: bool =
 
         function copySummary() {{
             const ulStr = "{f'{actual_max_ul:.2f} Mbps' if actual_max_ul > 0 else 'N/A'}";
-            const summary = `🚀 Network Speed Benchmark Report\\n📅 Date: {ts}\\n⚡ Max Download: {actual_max_dl:.2f} Mbps | Upload: ${{ulStr}}\\n📶 Ping: {ping} ms | Jitter: {jitter} ms | Loss: {packet_loss}%\\n🛡️ Bufferbloat: {bb.get("grade", "N/A")} (+{bb.get("delta_ms", 0)}ms)\\n⭐ Quality Score: {score}/100 ({tier})`;
+            const summary = `🚀 Network Speed Benchmark Report\\n📅 Date: ${{REPORT_TS}}\\n⚡ Max Download: {actual_max_dl:.2f} Mbps | Upload: ${{ulStr}}\\n📶 Ping: {ping} ms | Jitter: {jitter} ms | Loss: {packet_loss}%\\n🛡️ Bufferbloat: {bb.get("grade", "N/A")} (+{bb.get("delta_ms", 0)}ms)\\n⭐ Quality Score: {score}/100 (${{REPORT_TIER}})`;
             navigator.clipboard.writeText(summary).then(() => showToast('Summary copied to clipboard!'));
         }}
 
