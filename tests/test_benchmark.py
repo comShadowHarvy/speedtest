@@ -314,6 +314,38 @@ class TestPrintDNSLeaderboard(unittest.TestCase):
         self.assertIn("Best for Speed & Privacy", out)
 
 
+class TestModuleShadowing(unittest.TestCase):
+    """Local variables must never shadow the stdlib modules the tool relies on."""
+
+    IMPORTED_MODULES = ("argparse", "csv", "html", "json", "os", "re", "shutil",
+                        "socket", "subprocess", "sys", "tempfile", "threading", "time")
+
+    def test_no_local_variable_shadows_import(self):
+        import ast
+        with open(speedtest.__file__, "r") as f:
+            tree = ast.parse(f.read())
+        offenders = []
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for child in ast.walk(node):
+                targets = []
+                if isinstance(child, ast.Assign):
+                    targets = child.targets
+                elif isinstance(child, (ast.AnnAssign, ast.NamedExpr)):
+                    targets = [child.target]
+                for t in targets:
+                    for sub in ast.walk(t):
+                        if isinstance(sub, ast.Name) and sub.id in self.IMPORTED_MODULES:
+                            offenders.append(f"{node.name}: {sub.id}")
+        self.assertEqual(offenders, [], f"shadowed module names: {offenders}")
+
+    def test_html_module_still_usable_after_endpoint_checks(self):
+        with patch("speedtest.make_http_request", return_value="<html></html>"):
+            speedtest.check_endpoints(quiet=True)
+        self.assertEqual(speedtest.html.escape("<b>"), "&lt;b&gt;")
+
+
 class TestReportsExport(unittest.TestCase):
     def setUp(self):
         self.test_data = {

@@ -905,10 +905,10 @@ def check_endpoints(quiet: bool, debug: bool = False, ip_version: Optional[str] 
     if res_st and "client" in res_st:
         st_ok = True
 
-    # Check Fast.com
-    html = make_http_request("https://fast.com", timeout=CHECK_TIMEOUT, debug=debug, ip_version=ip_version)
-    if html:
-        js_path = JS_PATH_PATTERN.search(html)
+    # Check Fast.com (note: avoid naming this "html", which shadows the html module)
+    fast_home = make_http_request("https://fast.com", timeout=CHECK_TIMEOUT, debug=debug, ip_version=ip_version)
+    if fast_home:
+        js_path = JS_PATH_PATTERN.search(fast_home)
         if js_path:
             js_url = f"https://fast.com{js_path.group(1)}"
             js_content = make_http_request(js_url, timeout=CHECK_TIMEOUT, debug=debug, ip_version=ip_version)
@@ -1276,11 +1276,11 @@ def get_fastcom(
     """Fetches Fast.com download speed via adaptive multi-stream parallel downloads with IPv4/IPv6 support."""
     for attempt in range(retries + 1):
         try:
-            html = make_http_request("https://fast.com", timeout=HTTP_TIMEOUT, debug=debug, ip_version=ip_version)
-            if not html:
+            fast_home = make_http_request("https://fast.com", timeout=HTTP_TIMEOUT, debug=debug, ip_version=ip_version)
+            if not fast_home:
                 raise ValueError("Failed to fetch fast.com homepage")
 
-            js_path = JS_PATH_PATTERN.search(html)
+            js_path = JS_PATH_PATTERN.search(fast_home)
             if not js_path:
                 raise ValueError("JavaScript file not found")
 
