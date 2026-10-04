@@ -2994,6 +2994,10 @@ def validate_args(args) -> Optional[str]:
         return "--engine custom requires --server <URL> to point at a downloadable endpoint"
     if engine not in ("all", "custom") and server:
         return f"--server is only meaningful with '--engine all' or '--engine custom' (current engine: {engine})"
+    if server:
+        scheme = urllib.parse.urlparse(server).scheme.lower()
+        if scheme not in ("http", "https"):
+            return f"--server must use http:// or https:// (got: {scheme or 'no scheme'})"
 
     for flag, value in (
         ("--threshold-dl", getattr(args, "threshold_dl", None)),

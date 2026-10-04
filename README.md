@@ -160,6 +160,7 @@ Invalid flag combinations fail fast, before any benchmark work is done:
 - `--threshold-dl`, `--threshold-ul`, `--threshold-ping` must be greater than 0
 - `--engine custom` requires `--server <URL>`
 - `--server` cannot be combined with a non-`all`, non-`custom` engine
+- `--server` must use `http://` or `https://` (blocks `file://` and other local/scheme abuse)
 - `--dns`/`--no-dns`, `-4`/`-6`, `--html`/`--no-html`, `--open`/`--no-open` are mutually exclusive
 
 ### Exit Codes

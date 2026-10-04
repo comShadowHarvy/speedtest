@@ -1330,6 +1330,13 @@ class TestValidateArgs(unittest.TestCase):
     def test_server_rejected_for_other_engines(self):
         self.assertIn("--server", speedtest.validate_args(self._args(engine="fast", server="https://example.com/100MB.bin")))
 
+    def test_server_scheme_must_be_http(self):
+        for bad in ("file:///etc/passwd", "ftp://example.com/x.bin", "example.com/100MB.bin", "/tmp/local.bin"):
+            with self.subTest(url=bad):
+                self.assertIn("--server", speedtest.validate_args(self._args(engine="custom", server=bad)))
+        self.assertIsNone(speedtest.validate_args(self._args(engine="custom", server="https://example.com/100MB.bin")))
+        self.assertIsNone(speedtest.validate_args(self._args(engine="custom", server="http://example.com/100MB.bin")))
+
     def test_non_positive_thresholds(self):
         self.assertIn("--threshold-dl", speedtest.validate_args(self._args(threshold_dl=0)))
         self.assertIn("--threshold-ul", speedtest.validate_args(self._args(threshold_ul=-1)))
