@@ -2,7 +2,7 @@
 
 A high-performance, cross-platform CLI tool for network speed benchmarking, dual-stack IPv4/IPv6 diagnostics, directional bufferbloat analysis (DL/UL), DNS & DoH resolution tests, hardware link speed detection, interactive HTML dashboard generation, and SLA threshold monitoring.
 
-**Version: 3.2.0** | Universal Shell Execution, Multi-Gigabit Saturation, Parallelized DNS Engine, Specialized DNS Profiles, Directional Bufferbloat (DL/UL), Dual-Stack IPv4/IPv6, Hardware Link Speeds, Unicode Sparklines, DoH Benchmarking, and Modern Glassmorphism Dashboard
+**Version: 3.3.0** | Modular Package Layout, Universal Shell Execution, Multi-Gigabit Saturation, Parallelized DNS Engine, Specialized DNS Profiles, Directional Bufferbloat (DL/UL), Dual-Stack IPv4/IPv6, Hardware Link Speeds, Unicode Sparklines, DoH Benchmarking, and Modern Glassmorphism Dashboard
 
 ---
 
@@ -288,6 +288,41 @@ Run the included test suite to verify all calculations, algorithms, and report g
 
 ```bash
 python3 -m unittest discover -s tests -v
+```
+
+You can also run the tool directly as a Python module:
+
+```bash
+python3 -m speedtest_pkg.speedtest --engine cloudflare --dns
+```
+
+---
+
+## Project Structure
+
+Since v3.3.0 the codebase is split into a modular Python package instead of a
+single monolith. `speedtest.sh` remains the universal launcher
+(`./speedtest.sh`, `bash speedtest.sh`, `python3 speedtest.sh`) and re-exports
+the full public API for backward compatibility.
+
+```
+speedtest.sh                  # thin universal launcher (bash + python shim)
+speedtest_pkg/speedtest/
+├── __init__.py               # package version + module list
+├── __main__.py               # `python3 -m speedtest_pkg.speedtest` entry
+├── core.py                   # VERSION, colors, Spinner, HTTP/DNS primitives,
+│                             # statistics & bufferbloat math
+├── cli.py                    # argparse, validation, run_benchmark entry
+├── dns.py                    # system resolvers, DNS/DoH benchmark engine
+├── network.py                # endpoint checks, adapter info, LAN IP, geo
+├── engines.py                # Ookla / Fast.com / Cloudflare / custom engines
+├── timing.py                 # site timing, traceroute, ping monitor
+├── history.py                # result history save / display
+├── reports.py                # HTML / Markdown / JSON / CSV exports
+└── ui.py                     # banner, DNS leaderboard, timing tables
+tests/
+└── test_benchmark.py         # unit tests (calculations, parsers, reports)
+archive/                      # backup of the pre-split monolith
 ```
 
 ---
